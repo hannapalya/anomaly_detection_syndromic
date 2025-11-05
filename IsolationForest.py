@@ -10,9 +10,10 @@ import os, numpy as np, pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import confusion_matrix
+from load_split_indices import get_signal_split
 
 # ===== CONFIG =====
-DATA_DIR      = "/Users/u5585063/Desktop/anomaly_detect/anomaly_detect/signal_datasets/"
+DATA_DIR      = "signal_datasets_large"
 SIGNALS       = list(range(1,17))
 DAYS_PER_YEAR = 364
 TRAIN_YEARS   = 6
@@ -89,25 +90,83 @@ def sens_spec(y_true, y_pred):
     spec = TN/(TN+FP) if (TN+FP)>0 else np.nan
     return sens, spec
 
-def tune_contamination_threshold(y_val, decision_scores,
+def tune_contamination_threshold(val_sims, val_lengths, decision_scores,
                                  spec_target=SPEC_TARGET,
                                  w_sens=W_SENS, w_spec=W_SPEC):
+    """
+    Tune contamination threshold using R-comparator metrics.
+    Requires full simulation data to compute R-comparator metrics.
+    """
+    # Build O_full from validation sims (full time series)
+    O_full_list = [d["y"] for d in val_sims]
+    O_full = np.stack(O_full_list, axis=1)  # [n_total_days, n_val_sims]
+    
     best_c, best_score = None, -1.0
     grid = [0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, 0.06, 0.07]
+    
+    # IDX_RANGE for R-comparator metrics
+    IDX_RANGE = np.arange(2205, 2548, dtype=int)  # R: 2206:2548 (1-based), Python: 2205:2548 (0-based)
+    
     for c in grid:
         thr = np.percentile(decision_scores, c*100)
         yhat = (decision_scores <= thr).astype(int)
-        s, sp = sens_spec(y_val, yhat)
+        
+        # Build alarm matrix A from yhat predictions (split by simulation lengths)
+        A_list = []
+        offset = 0
+        for L in val_lengths:
+            if L > 0:
+                A_list.append(yhat[offset:offset+L])
+                offset += L
+        
+        if not A_list or len(A_list) != len(val_sims):
+            continue
+        
+        # Pad/align to create proper alarm matrix [validation_period_length, n_sims]
+        max_len = max(len(a) for a in A_list)
+        A_padded = []
+        for a in A_list:
+            padded = np.zeros(max_len, dtype=int)
+            padded[:len(a)] = a
+            A_padded.append(padded)
+        A = np.column_stack(A_padded)  # [max_val_len, n_val_sims]
+        
+        # Use R-comparator metrics
+        sp = compute_specificity_R(A, O_full, IDX_RANGE)
+        s = compute_sensitivity_R(A, O_full)
+        
         if (sp is not np.nan) and sp >= spec_target:
             score = w_sens*s + w_spec*sp
             if score > best_score:
                 best_c, best_score = c, score
+    
     if best_c is None:
         best_sp, best_c = -1.0, 0.02
         for c in [0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05]:
             thr = np.percentile(decision_scores, c*100)
             yhat = (decision_scores <= thr).astype(int)
-            _, sp = sens_spec(y_val, yhat)
+            
+            # Build alarm matrix
+            A_list = []
+            offset = 0
+            for L in val_lengths:
+                if L > 0:
+                    A_list.append(yhat[offset:offset+L])
+                    offset += L
+            
+            if not A_list or len(A_list) != len(val_sims):
+                continue
+            
+            max_len = max(len(a) for a in A_list)
+            A_padded = []
+            for a in A_list:
+                padded = np.zeros(max_len, dtype=int)
+                padded[:len(a)] = a
+                A_padded.append(padded)
+            A = np.column_stack(A_padded)
+            
+            sp = compute_specificity_R(A, O_full, IDX_RANGE)
+            
             if sp > best_sp:
                 best_sp, best_c = sp, c
         print("NOTE: no contamination hit the specificity target; chose the most specific fallback.")
@@ -215,6 +274,18 @@ rng = np.random.RandomState(RNG_STATE)
 summary_all = {}
 rows_val, rows_test = [], []
 
+# Load predefined splits
+print("Loading predefined train/validation/test splits...")
+try:
+    split_data = get_signal_split(1)  # Test loading
+    print("✓ Predefined splits loaded successfully")
+except Exception as e:
+    print(f"⚠ Warning: Could not load predefined splits: {e}")
+    print("  Falling back to random splits per signal")
+    USE_PREDEFINED_SPLITS = False
+else:
+    USE_PREDEFINED_SPLITS = True
+
 for S in SIGNALS:
     print(f"\n--- Signal {S} (Isolation Forest - Fair Comparison) ---")
     Xsig, Ysig = load_data(S)
@@ -224,16 +295,77 @@ for S in SIGNALS:
         x = Xsig[col].to_numpy(np.float32, copy=False)
         y = Ysig[col].to_numpy(np.int32,  copy=False)
         if len(x) >= TRAIN_DAYS + VALID_DAYS:
-            sims.append(dict(x=x, y=y, sim=f"sig{S}_sim{sim_idx}"))
+            sims.append(dict(x=x, y=y, sim=f"sig{S}_sim{sim_idx}", sim_idx=sim_idx))
     if not sims:
         print("No complete sims; skip."); continue
 
-    train_sims, held_sims = cross_sim_split(sims, rng, train_frac=0.6)
-    mid = max(1, len(held_sims)//2)
-    val_sims = held_sims[:mid]
-    test_sims_final = held_sims[mid:] if len(held_sims) > 1 else held_sims
-    print(f"  Using {len(train_sims)} sims for training (first 6y), "
-          f"{len(val_sims)} for validation, {len(test_sims_final)} for testing")
+    # Use predefined splits or fall back to random
+    if USE_PREDEFINED_SPLITS:
+        try:
+            # Get predefined splits for this signal
+            signal_splits = get_signal_split(S)
+            
+            # Create lookup sets
+            val_set = {(S, s['sim_index']) for s in signal_splits['validation']}
+            test_set = {(S, s['sim_index']) for s in signal_splits['test']}
+            
+            # Verify no overlap between validation and test sets
+            overlap = val_set & test_set
+            if overlap:
+                raise ValueError(
+                    f"ERROR: Overlap detected between validation and test sets for signal {S}! "
+                    f"Overlapping simulations: {overlap}"
+                )
+            
+            # Filter simulations into train/val/test groups
+            train_sims = []
+            val_sims = []
+            test_sims_final = []
+            
+            for sim in sims:
+                sim_key = (S, sim['sim_idx'])
+                if sim_key in val_set:
+                    val_sims.append(sim)
+                elif sim_key in test_set:
+                    test_sims_final.append(sim)
+                else:
+                    train_sims.append(sim)
+            
+            # Verify counts match expected
+            if len(val_sims) != len(signal_splits['validation']):
+                print(f"  ⚠ Warning: Expected {len(signal_splits['validation'])} val sims, got {len(val_sims)}")
+            if len(test_sims_final) != len(signal_splits['test']):
+                print(f"  ⚠ Warning: Expected {len(signal_splits['test'])} test sims, got {len(test_sims_final)}")
+            
+            # Double-check no overlap by checking identifiers
+            val_identifiers = {sim['sim'] for sim in val_sims}
+            test_identifiers = {sim['sim'] for sim in test_sims_final}
+            overlap_identifiers = val_identifiers & test_identifiers
+            if overlap_identifiers:
+                raise ValueError(
+                    f"ERROR: Overlap detected in simulation identifiers for signal {S}! "
+                    f"Overlapping: {overlap_identifiers}"
+                )
+            
+            print(f"  Using predefined splits: {len(train_sims)} train, "
+                  f"{len(val_sims)} val, {len(test_sims_final)} test (✓ no overlap verified)")
+        except Exception as e:
+            print(f"  ⚠ Warning: Error loading splits for signal {S}: {e}")
+            print(f"  Falling back to random split...")
+            train_sims, held_sims = cross_sim_split(sims, rng, train_frac=0.6)
+            mid = max(1, len(held_sims)//2)
+            val_sims = held_sims[:mid]
+            test_sims_final = held_sims[mid:] if len(held_sims) > 1 else held_sims
+            print(f"  Using {len(train_sims)} sims for training (first 6y), "
+                  f"{len(val_sims)} for validation, {len(test_sims_final)} for testing")
+    else:
+        # Fallback: random split
+        train_sims, held_sims = cross_sim_split(sims, rng, train_frac=0.6)
+        mid = max(1, len(held_sims)//2)
+        val_sims = held_sims[:mid]
+        test_sims_final = held_sims[mid:] if len(held_sims) > 1 else held_sims
+        print(f"  Using {len(train_sims)} sims for training (first 6y), "
+              f"{len(val_sims)} for validation, {len(test_sims_final)} for testing")
 
     def build_train_matrix(window_size):
         XtrL = []
@@ -277,13 +409,31 @@ for S in SIGNALS:
 
         if len(Xval_s):
             val_scores = iso.decision_function(Xval_s)  # higher = more normal
-            c_best = tune_contamination_threshold(Yval, val_scores,
+            c_best = tune_contamination_threshold(val_sims, val_lengths, val_scores,
                                                   spec_target=SPEC_TARGET,
                                                   w_sens=W_SENS, w_spec=W_SPEC)
             thr = np.percentile(val_scores, c_best*100)
             yhat = (val_scores <= thr).astype(int)
-            s, sp = sens_spec(Yval, yhat)
-            score = (W_SENS*s + W_SPEC*sp) if sp >= SPEC_TARGET else sp
+            
+            # Compute R-comparator metrics for validation (for logging)
+            O_full_val = np.stack([d["y"] for d in val_sims], axis=1)
+            A_list = []
+            offset = 0
+            for L in val_lengths:
+                if L > 0:
+                    A_list.append(yhat[offset:offset+L])
+                    offset += L
+            if A_list and len(A_list) == len(val_sims):
+                max_len = max(len(a) for a in A_list)
+                A_padded = [np.pad(a, (0, max_len - len(a)), mode='constant') for a in A_list]
+                A = np.column_stack(A_padded)
+                IDX_RANGE = np.arange(2205, 2548, dtype=int)
+                s = compute_sensitivity_R(A, O_full_val)
+                sp = compute_specificity_R(A, O_full_val, IDX_RANGE)
+                score = (W_SENS*s + W_SPEC*sp) if sp >= SPEC_TARGET else sp
+            else:
+                s, sp = np.nan, np.nan
+                score = -1.0
             if score > best["score"]:
                 best.update(score=score,
                             params=dict(WINDOW_SIZE=WINDOW_SIZE, N_EST=N_EST,
