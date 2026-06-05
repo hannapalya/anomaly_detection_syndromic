@@ -2,11 +2,11 @@
 
 ## 1. Introduction
 
-Early detection of disease outbreaks is a central objective of syndromic surveillance systems. The aberration detection algorithms currently deployed in national systems --- the Farrington Flexible method (Noufaily *et al.*, 2013) and the RAMMIE (rising activity, multilevel mixed effects, indicator emphasis) method used by Public Health England / the UK Health Security Agency --- are well-established statistical approaches. Noufaily *et al.* (2019) compared these two methods against the Early Aberration Reporting System (EARS) on simulated daily syndromic data, concluding that, among variants maintaining high specificity, Farrington Flexible achieves the highest sensitivity and specificity while RAMMIE achieves the highest probability of detection and timeliness. These statistical methods may nonetheless fail to detect outbreaks with unusual temporal profiles or small signal-to-noise ratios. Machine learning methods offer a potential complement: by learning the distribution of normal surveillance counts without explicit parametric assumptions, they may detect a broader class of aberrations.
+The early detection of public health incidents, including outbreaks, is a central objective of syndromic surveillance systems. The aberration detection algorithms currently deployed in national systems include the Farrington Flexible (Noufaily *et al.*, 2013) and RAMMIE (rising activity, multilevel mixed effects, indicator emphasis) used by the UK Health Security Agency, and the Early Aberration Reporting System (EARS) used by the US CDC (Hutwagner *et al.*, 2003; Noufaily *et al.*, 2013; Morbey *et al.*, 2015). Noufaily *et al.* (2019) compared these three methods against each other on simulated daily syndromic data. They concluded that, among variants maintaining high specificity, Farrington Flexible achieves the highest mean sensitivity and specificity while RAMMIE achieves the highest mean probability of detecting the outbreaks. However, these statistical methods are slow at detecting anomalies of smaller magnitudes and often fail to detect anomalies with small signal-to-noise ratios. By learning the distribution of normal surveillance counts without explicit parametric assumptions, machine learning models may detect these kind of anomalies.
 
-This study extends the comparison of Noufaily *et al.* (2019) by introducing unsupervised machine learning detectors, evaluated on the same simulation framework. We benchmark against Farrington Flexible specifically because it was the strongest high-specificity method in that comparison; it therefore represents the most demanding statistical baseline against which to assess whether machine learning offers a genuine improvement. (RAMMIE and EARS, the other two methods in that comparison, are not re-implemented here; a fuller benchmark against all deployed methods is left to future work.)
+This study extends the comparison of Noufaily *et al.* (2019) by introducing unsupervised machine learning models as anomaly detectors, evaluated on the simulated data used by Noufaily *et al.* (2019). We benchmark against Farrington Flexible specifically because it was the strongest high-specificity method in that comparison. We also include other GLM-based methods, but RAMMIE and EARS, the other two methods in the Noufaily *et al.* (2019) comparison, are not re-implemented here.
 
-This chapter presents a systematic comparison of unsupervised anomaly detection methods applied to simulated daily syndromic surveillance count data. The study evaluates 12 individual detectors drawn from three methodological families --- density-based methods on tabular features, reconstruction-based deep learning models, and seasonal-baseline statistical detectors --- together with OR-vote ensemble combinations of these detectors. All methods are evaluated under identical data splits, threshold-tuning conventions, and the evaluation metrics of Noufaily *et al.* (2019), enabling direct comparison. The robustness of each method is assessed across three outbreak magnitude levels (small, medium, and large), providing evidence on which method families are most suitable for deployment across a range of outbreak scenarios.
+This chapter presents a systematic comparison of unsupervised anomaly detection methods applied to simulated daily syndromic surveillance count data. We first evaluate 11 individual detectors that can be categorized into three families: density-based methods on tabular features, reconstruction-based deep learning models, and seasonal-baseline statistical detectors. We then evaluate OR-vote ensemble combinations of these detectors. All methods are evaluated under identical data splits, threshold-tuning conventions, and the evaluation metrics of Noufaily *et al.* (2019). The robustness of each method is assessed across three outbreak magnitude levels (small, medium, and large), providing evidence on which method families are most suitable for deployment across a range of outbreak scenarios.
 
 The structure of this chapter is as follows. Section 2 describes the simulated dataset and the evaluation framework, including the metric definitions and threshold-tuning procedure. Section 3 presents each method family and the algorithms within it, including a residual-feature variant of the tabular detectors. Section 4 reports individual detector results, robustness across magnitudes, per-signal variation, ensemble configurations, and the residual-feature ablation. Section 5 discusses the implications of these results, including the mechanistic signal properties that govern method success and the limits of detectability. Section 6 concludes with recommendations for deployment.
 
@@ -78,7 +78,7 @@ All experiments use a fixed pseudorandom seed (`RNG_STATE = 42`) for the simulat
 
 ## 3. Methods
 
-The 12 detectors evaluated in this study fall into three methodological families, described below.
+The 11 detectors evaluated in this study fall into three methodological families, described below.
 
 ### 3.1 Density and distance-based methods on tabular features
 
@@ -114,12 +114,6 @@ yields different detectors.
 
 **Farrington Flexible ($\alpha = 0.01$).** This is the Noufaily *et al.* (2013) Farrington Flexible algorithm, the current reference method for aberration detection in national surveillance. The implementation used here is a faithful reproduction of the algorithm in the R `surveillance` package, inlined so that it operates directly on the daily series (aggregating to weekly reference counts internally). It comprises the full Farrington Flexible machinery: a quasi-Poisson GLM with a log link fitted to a ten-group seasonal reference window spanning the preceding $b = 5$ years with half-window $w = 3$ weeks; Anscombe-residual reweighting to downweight past aberrations during fitting; an optional linear time trend admitted only when significant; a Negative Binomial predictive upper bound at significance level $\alpha = 0.01$ when overdispersion is present (Poisson otherwise); the exceedance statistic $X = (y_t - \hat{\mu}_t)/(U_t - \hat{\mu}_t)$ with an alarm raised when $X > 1$; and the `limit54` minimum-count filter that suppresses alarms when fewer than five cases are observed in the preceding four reference periods. Because it shares the same Negative Binomial seasonal-baseline philosophy as the other methods in this family, it is grouped here, but it is distinguished as the deployed-system reference against which the machine learning methods are benchmarked.
 
-**Noufaily-quantile.** The anomaly score is the negative log survival probability under the fitted baseline:
-
-$$s_t = -\log P(Y \geq y_t \mid \text{NB}(\hat{\mu}_t, \hat{\alpha})).$$
-
-Days on which the observed count falls far into the upper tail of the baseline distribution receive high scores.
-
 **CUSUM (Negative Binomial seasonal).** A one-sided cumulative sum is computed on the Pearson residuals:
 
 $$S_t = \max(0, \; S_{t-1} + r_t - k),$$
@@ -147,14 +141,14 @@ Alternative aggregation strategies --- mean-z normalisation (averaging robust z-
 
 ### 4.1 Individual detector performance at medium outbreak magnitude
 
-Table 1 presents the performance of all 12 individual detectors and two OR-vote ensemble configurations at medium outbreak magnitude, sorted by sensitivity. All values are means across 16 signals. The Farrington-containing ensemble is omitted at this magnitude, as its cross-magnitude figures were not independently verified (Section 4.4).
+Table 1 presents the performance of all 11 individual detectors and two OR-vote ensemble configurations at medium outbreak magnitude, sorted by sensitivity. All values are means across 16 signals.
 
 **Table 1.** Performance of unsupervised anomaly detection methods at medium outbreak magnitude. Metrics are averaged across 16 signals. Methods are sorted by sensitivity in descending order.
 
 | Rank | Method | Sensitivity | Specificity | POD | Timeliness | FPR | Family |
 |------|--------|:-----------:|:-----------:|:---:|:----------:|:---:|--------|
-| 1 | OR-vote (IF+LSTM-AE+NB-HMM+Noufaily) | 0.841 | 0.927 | 0.991 | 0.073 | 0.073 | ensemble |
-| 2 | OR-vote (IF+LSTM-AE+NB-HMM) | 0.802 | 0.943 | 0.986 | 0.109 | 0.057 | ensemble |
+| 1 | OR-vote (Farrington+IF+LSTM-AE+NB-HMM) | 0.857 | 0.940 | 0.992 | 0.094 | 0.060 | ensemble |
+| 2 | OR-vote (IF+LSTM-AE+NB-HMM) | 0.853 | 0.948 | 0.991 | 0.097 | 0.052 | ensemble |
 | 3 | KNN | 0.750 | 0.975 | 0.938 | 0.178 | 0.025 | tabular |
 | 4 | LSTM-AE | 0.711 | 0.976 | 0.879 | 0.240 | 0.024 | deep learning |
 | 5 | LOF | 0.703 | 0.974 | 0.913 | 0.211 | 0.026 | tabular |
@@ -164,17 +158,16 @@ Table 1 presents the performance of all 12 individual detectors and two OR-vote 
 | 9 | Farrington ($\alpha=0.01$) | 0.556 | 0.979 | 0.931 | 0.215 | 0.021 | statistical |
 | 10 | VAE (NegBin) | 0.516 | 0.973 | 0.974 | 0.132 | 0.027 | deep learning |
 | 11 | CUSUM | 0.460 | 0.974 | 0.651 | 0.485 | 0.026 | statistical |
-| 12 | Noufaily-quantile | 0.457 | 0.973 | 0.969 | 0.099 | 0.027 | statistical |
-| 13 | RateChange-residual | 0.272 | 0.977 | 0.984 | 0.088 | 0.023 | statistical |
-| 14 | BOCPD-residual | 0.212 | 0.973 | 0.962 | 0.112 | 0.027 | statistical |
+| 12 | RateChange-residual | 0.272 | 0.977 | 0.984 | 0.088 | 0.023 | statistical |
+| 13 | BOCPD-residual | 0.212 | 0.973 | 0.962 | 0.112 | 0.027 | statistical |
 
 Among individual detectors, KNN achieves the highest sensitivity (0.750), followed by LSTM-AE (0.711), LOF (0.703), and Isolation Forest (0.678). All individual detectors maintain specificity above 0.97, with false positive rates between 0.014 and 0.028. The Farrington method at $\alpha=0.01$ retains high specificity (0.979) but ranks ninth overall in sensitivity (0.556).
 
-The OR-vote ensembles substantially outperform every individual detector. The four-detector ensemble (IF + LSTM-AE + NB-HMM + Noufaily) achieves sensitivity 0.841 with timeliness 0.073, compared to the best individual detector's sensitivity of 0.750. This improvement comes at the cost of a higher false positive rate (0.073 vs. approximately 0.025 for individual detectors).
+The OR-vote ensembles substantially outperform every individual detector. The four-detector ensemble (Farrington + IF + LSTM-AE + NB-HMM) achieves sensitivity 0.857 with timeliness 0.094, compared to the best individual detector's sensitivity of 0.750. This improvement comes at the cost of a higher false positive rate (0.060 vs. approximately 0.025 for individual detectors).
 
 ### 4.2 Robustness across outbreak magnitudes
 
-To assess whether detection performance generalises across outbreak intensities, all methods were re-evaluated on medium and large outbreak magnitudes with independently re-tuned hyperparameters and alarm thresholds. Table 2 presents sensitivity and timeliness across the three magnitudes for all 12 individual detectors.
+To assess whether detection performance generalises across outbreak intensities, all methods were re-evaluated on medium and large outbreak magnitudes with independently re-tuned hyperparameters and alarm thresholds. Table 2 presents sensitivity and timeliness across the three magnitudes for all 11 individual detectors.
 
 **Table 2.** Sensitivity and timeliness of individual detectors across three outbreak magnitudes. $\Delta$ Sens denotes the change in sensitivity from small to large magnitude. Methods are sorted by large-magnitude sensitivity.
 
@@ -188,7 +181,6 @@ To assess whether detection performance generalises across outbreak intensities,
 | LOF | 0.565 | 0.703 | --- | 0.326 | 0.211 | --- | +0.138* |
 | Farrington ($\alpha=0.01$) | 0.440 | 0.556 | 0.639 | 0.378 | 0.215 | 0.128 | +0.199 |
 | VAE (NegBin) | 0.424 | 0.516 | 0.611 | 0.226 | 0.132 | 0.080 | +0.187 |
-| Noufaily-quantile | 0.382 | 0.457 | 0.529 | 0.163 | 0.099 | 0.049 | +0.147 |
 | CUSUM | 0.404 | 0.460 | 0.393 | 0.533 | 0.485 | 0.571 | -0.011 |
 | RateChange-residual | 0.234 | 0.272 | 0.294 | 0.153 | 0.088 | 0.047 | +0.060 |
 | BOCPD-residual | 0.175 | 0.212 | 0.291 | 0.198 | 0.112 | 0.051 | +0.116 |
@@ -270,18 +262,18 @@ However, CUSUM and NB-HMM retain high cross-signal variation even at large magni
 
 ### 4.4 Ensemble performance across magnitudes
 
-The detailed ensemble analysis below (Section 4.5) is conducted at small outbreak magnitude, where ensembles provide their greatest benefit. The two ensembles that contain no Farrington term, and are therefore unaffected by the alarm-alignment correction described in Section 4.5, were also evaluated at medium and large magnitudes (Table 3). The ensemble's *relative* advantage over individual detectors necessarily narrows as outbreak magnitude grows: individual tabular detectors scale strongly with magnitude (Table 2; e.g. Isolation Forest from 0.523 to 0.827, KNN from 0.615 to 0.854), whereas ensemble sensitivity is already high at small magnitude and bounded above by the detectability ceiling (Section 5.7). Consequently, the gap between the best single detector and the best ensemble contracts from approximately 19 percentage points at small magnitude to a few points at large magnitude.
+The detailed ensemble analysis below (Section 4.5) is conducted at small outbreak magnitude, where ensembles provide their greatest benefit. The two headline ensembles were also evaluated at medium and large magnitudes, using the magnitude-aligned per-detector alarms (Table 3). The ensemble's *relative* advantage over individual detectors necessarily narrows as outbreak magnitude grows: individual tabular detectors scale strongly with magnitude (Table 2; e.g. Isolation Forest from 0.523 to 0.827, KNN from 0.615 to 0.854), whereas the ensembles are already strong at small magnitude and bounded above by the detectability ceiling (Section 5.7). Consequently, the gap between the best single detector and the best ensemble contracts from approximately 17 percentage points at small magnitude (0.78 vs. KNN 0.615) to about five points at large magnitude (0.90 vs. KNN 0.854).
 
-**Table 3.** Cross-magnitude sensitivity for the two Farrington-free OR-vote ensembles (unaffected by the alarm-alignment correction). Farrington-containing configurations were re-verified only at small magnitude (Table 8) and their cross-magnitude figures are therefore omitted.
+**Table 3.** Cross-magnitude sensitivity, with small-magnitude timeliness and FPR, for the two headline OR-vote ensembles, computed from the magnitude-aligned per-detector alarms.
 
 | Ensemble | Sens (S) | Sens (M) | Sens (L) | Tim (S) | FPR (S) |
 |----------|:--------:|:--------:|:--------:|:-------:|:-------:|
-| OR-vote (IF+LSTM-AE+NB-HMM+Noufaily) | 0.808 | 0.841 | 0.829 | 0.107 | 0.075 |
-| OR-vote (IF+LSTM-AE+NB-HMM) | 0.774 | 0.802 | 0.741 | 0.147 | 0.059 |
+| OR-vote (Farrington+IF+LSTM-AE+NB-HMM) | 0.783 | 0.857 | 0.903 | 0.141 | 0.068 |
+| OR-vote (IF+LSTM-AE+NB-HMM) | 0.770 | 0.853 | 0.902 | 0.146 | 0.060 |
 
 ### 4.5 Combinatorial ensemble search with validation-based selection
 
-To identify the most effective OR-vote ensemble, all 2--5 element subsets of eight base detectors (Farrington Flexible, IF, LSTM-AE, NB-HMM, BOCPD-residual, CUSUM, Noufaily, VAE) were evaluated --- 210 configurations in total. Two methodological safeguards distinguish this analysis. First, to avoid selection-on-test bias, each configuration's metrics were computed on *both* the validation and test partitions; the winning configuration at each operating point is chosen by its **validation** sensitivity and its **test** metrics are then reported. This ensures that no test-set information informs the choice of which detectors to combine. Second, every constituent detector's alarm threshold is tuned on validation alone (Section 2.4), and Farrington Flexible alarms are generated on the matching data magnitude --- correcting an earlier alignment error in which test-window alarms from the wrong magnitude inflated Farrington-containing ensembles by 8--17 percentage points.
+To identify the most effective OR-vote ensemble, all 2--5 element subsets of seven base detectors (Farrington Flexible, IF, LSTM-AE, NB-HMM, BOCPD-residual, CUSUM, VAE) were evaluated --- 112 configurations in total. Two methodological safeguards distinguish this analysis. First, to avoid selection-on-test bias, each configuration's metrics were computed on *both* the validation and test partitions; the winning configuration at each operating point is chosen by its **validation** sensitivity and its **test** metrics are then reported. This ensures that no test-set information informs the choice of which detectors to combine. Second, every constituent detector's alarm threshold is tuned on validation alone (Section 2.4), and Farrington Flexible alarms are generated on the matching data magnitude --- correcting an earlier alignment error in which test-window alarms from the wrong magnitude inflated Farrington-containing ensembles by 8--17 percentage points.
 
 Table 8 reports the validation-selected ensembles at three operating constraints, together with the lowest-cost configurations meeting the standard specificity floor. All sensitivities are test-set values.
 
@@ -289,15 +281,15 @@ Table 8 reports the validation-selected ensembles at three operating constraints
 
 | Selection constraint | Ensemble (val-selected) | Sensitivity | Specificity | FPR | Timeliness | Cost |
 |----------------------|-------------------------|:-----------:|:-----------:|:---:|:----------:|------|
-| Max sensitivity (spec $\geq 0.93$) | Farrington + IF + LSTM-AE + NB-HMM | 0.785 | 0.933 | 0.067 | 0.143 | expensive |
-| Highest-sens GPU-free (spec $\geq 0.93$) | IF + LSTM-AE + NB-HMM + Noufaily | 0.808 | 0.925 | 0.075 | 0.107 | expensive |
-| Balanced (spec $\geq 0.95$) | LSTM-AE + NB-HMM | 0.739 | 0.955 | 0.045 | 0.187 | expensive |
+| Max sensitivity (spec $\geq 0.93$) | Farrington + IF + LSTM-AE + NB-HMM | 0.783 | 0.932 | 0.068 | 0.141 | expensive |
+| Highest-sens Farrington-free (spec $\geq 0.93$) | IF + LSTM-AE + NB-HMM | 0.770 | 0.940 | 0.060 | 0.146 | expensive |
+| Balanced (spec $\geq 0.95$) | LSTM-AE + NB-HMM | 0.735 | 0.954 | 0.046 | 0.190 | expensive |
 | Best GPU-free (spec $\geq 0.95$) | IF + NB-HMM | 0.694 | 0.954 | 0.046 | 0.160 | medium |
 | Best all-cheap (spec $\geq 0.96$) | Farrington + NB-HMM | 0.615 | 0.962 | 0.038 | 0.226 | cheap |
 
-The best OR-vote ensembles reach test sensitivity 0.78--0.81 at the most permissive operating point (specificity $\approx 0.93$), comfortably exceeding the best single detector (KNN, 0.615). A paired cluster bootstrap over the 16 signals confirms that the ensemble advantage is statistically reliable: the recommended Farrington + IF + NB-HMM ensemble (test sensitivity 0.725) exceeds KNN by $+0.110$ (95% CI $[+0.038, +0.186]$, $p < 0.01$). The advantage is, however, smaller than earlier (uncorrected) figures suggested, and it is purchased at a specificity cost: the high-sensitivity ensembles operate near specificity 0.93--0.95, against $\approx 0.97$ for the single detectors.
+The best OR-vote ensembles reach test sensitivity 0.77--0.78 at the most permissive operating point (specificity $\approx 0.93$), comfortably exceeding the best single detector (KNN, 0.615). A paired cluster bootstrap over the 16 signals confirms that the ensemble advantage is statistically reliable: the recommended Farrington + IF + NB-HMM ensemble (test sensitivity 0.725) exceeds KNN by $+0.110$ (95% CI $[+0.038, +0.186]$, $p < 0.01$). The advantage is, however, smaller than earlier (uncorrected) figures suggested, and it is purchased at a specificity cost: the high-sensitivity ensembles operate near specificity 0.93--0.95, against $\approx 0.97$ for the single detectors.
 
-The corrected figures also revise the earlier conclusion that the Farrington-anchored three-detector ensemble was uniformly best. After alarm-magnitude alignment and validation-based selection, the strongest GPU-free configuration at the high-sensitivity operating point is IF + LSTM-AE + NB-HMM + Noufaily (0.808) --- which contains no Farrington term and is therefore unaffected by the alignment correction --- while Farrington + IF + NB-HMM (0.725) remains a competitive lower-cost option. Farrington Flexible nonetheless contributes genuine complementary coverage, because its NB-quantile exceedance rule fires on different events than the HMM posterior or the feature-space distance; its contribution is simply more modest than the inflated figures implied.
+After alarm-magnitude alignment and validation-based selection, the strongest configuration at the high-sensitivity operating point is the four-detector Farrington + IF + LSTM-AE + NB-HMM (0.783), with the Farrington-free IF + LSTM-AE + NB-HMM close behind (0.770); the lower-cost Farrington + IF + NB-HMM (0.725) remains a competitive option. Farrington Flexible contributes genuine complementary coverage, because its NB-quantile exceedance rule fires on different events than the HMM posterior or the feature-space distance.
 
 ### 4.6 Residual-feature variant on seasonal signals
 
@@ -392,13 +384,13 @@ The residual-feature ablation (Section 4.6) reinforces this conclusion from a di
 
 ### 5.2 The value of OR-vote ensembles is greatest at small magnitudes
 
-At small outbreak magnitude, optimising any single detector yields at most sensitivity 0.615 (KNN). The OR-vote ensemble of four detectors from different families (IF + LSTM-AE + NB-HMM + Noufaily) reaches 0.808, a gain of 19 percentage points that a paired cluster bootstrap confirms is statistically reliable (Section 4.5). At large magnitude, however, the gap narrows sharply: KNN alone achieves 0.854, while the Farrington-free ensembles for which cross-magnitude figures are verified plateau near 0.74--0.83 (Table 3). This pattern arises because at low signal-to-noise, different detection families succeed on different subsets of simulations and signals, and OR-voting captures the union of these successes; at high signal-to-noise, the outbreak signal is strong enough that most methods detect it, and the marginal value of additional detectors diminishes. The ensemble is therefore most valuable precisely in the operationally hardest regime --- small, subtle outbreaks.
+At small outbreak magnitude, optimising any single detector yields at most sensitivity 0.615 (KNN). The OR-vote ensemble of four detectors from different families (Farrington + IF + LSTM-AE + NB-HMM) reaches 0.783, a gain of 17 percentage points that a paired cluster bootstrap confirms is statistically reliable (Section 4.5). At large magnitude, however, the gap narrows sharply: KNN alone achieves 0.854, while the best ensemble reaches 0.902 (Table 3) --- a margin of only about five points. This pattern arises because at low signal-to-noise, different detection families succeed on different subsets of simulations and signals, and OR-voting captures the union of these successes; at high signal-to-noise, the outbreak signal is strong enough that most methods detect it, and the marginal value of additional detectors diminishes. The ensemble is therefore most valuable precisely in the operationally hardest regime --- small, subtle outbreaks.
 
 This finding has practical implications. For surveillance systems that must detect outbreaks across a range of magnitudes, including small ones, ensemble strategies provide a substantial and otherwise unattainable performance gain. For systems operating in settings where outbreaks are expected to be large (e.g., monitoring for pandemic-scale events), a well-tuned individual detector such as KNN or Isolation Forest may suffice.
 
 ### 5.3 Statistical baseline methods occupy a distinct niche
 
-The six methods that share the Negative Binomial seasonal baseline (CUSUM, BOCPD-residual, NB-HMM, Noufaily, RateChange, Farrington) span a wide performance range (sensitivity 0.175 to 0.522 at small magnitude). NB-HMM is the strongest, consistently outperforming Farrington by 8--10 sensitivity points at every magnitude. The hidden-state formulation of NB-HMM appears to extract more information from the baseline residuals than the single-day testing approaches (Farrington, Noufaily) or the cumulative accumulation approach (CUSUM).
+The five methods that share the Negative Binomial seasonal baseline (CUSUM, BOCPD-residual, NB-HMM, RateChange, Farrington) span a wide performance range (sensitivity 0.175 to 0.522 at small magnitude). NB-HMM is the strongest, consistently outperforming Farrington by 8--10 sensitivity points at every magnitude. The hidden-state formulation of NB-HMM appears to extract more information from the baseline residuals than the single-day testing approach (Farrington) or the cumulative accumulation approach (CUSUM).
 
 CUSUM exhibits flat sensitivity across magnitudes (0.404, 0.460, 0.393), an unexpected result given that larger outbreaks produce larger residuals. The explanation is that both the slack parameter $k$ and the alarm threshold are re-tuned per magnitude, so that gains from larger signals are offset by tighter thresholds. Timeliness remains poor for CUSUM (approximately 0.5), as the cumulative-sum mechanism requires several days of elevated counts before triggering. BOCPD-residual slightly degrades with increasing magnitude (-0.033), likely because the Gaussian approximation to the Pearson residuals becomes less accurate when extreme counts from large outbreaks inflate the residuals.
 
@@ -422,7 +414,7 @@ CUSUM's extreme signal-dependence (sensitivity ranging from 0.000 on bronchitis 
 
 ### 5.6 Comparison with supervised methods
 
-A natural question is how these unsupervised methods compare to a supervised detector that has access to outbreak labels at training time. A companion analysis (reported separately) trains a supervised stacked meta-learner on the outputs of the individual detectors; its principal advantage over the unsupervised ensembles is specificity, since by learning the explicit boundary between outbreak and non-outbreak days it can suppress false alarms more aggressively than an unsupervised OR-vote. On sensitivity, however, the best unsupervised ensemble (IF + LSTM-AE + NB-HMM + Noufaily, 0.808 at small magnitude) is competitive, and at large magnitude individual unsupervised detectors (KNN 0.854, IF 0.827) are strong in absolute terms. The practical argument for the unsupervised approach is that it requires no labelled outbreak examples at training time --- the decisive consideration for novel or emerging diseases, where such labels do not exist. A full quantitative supervised-versus-unsupervised comparison is left to the companion work, as the supervised stacker falls outside the unsupervised scope of this chapter.
+A natural question is how these unsupervised methods compare to a supervised detector that has access to outbreak labels at training time. A companion analysis (reported separately) trains a supervised stacked meta-learner on the outputs of the individual detectors; its principal advantage over the unsupervised ensembles is specificity, since by learning the explicit boundary between outbreak and non-outbreak days it can suppress false alarms more aggressively than an unsupervised OR-vote. On sensitivity, however, the best unsupervised ensemble (Farrington + IF + LSTM-AE + NB-HMM, 0.783 at small magnitude) is competitive, and at large magnitude individual unsupervised detectors (KNN 0.854, IF 0.827) are strong in absolute terms. The practical argument for the unsupervised approach is that it requires no labelled outbreak examples at training time --- the decisive consideration for novel or emerging diseases, where such labels do not exist. A full quantitative supervised-versus-unsupervised comparison is left to the companion work, as the supervised stacker falls outside the unsupervised scope of this chapter.
 
 For novel-outbreak detection on previously unseen signals --- the core use case for syndromic surveillance of emerging diseases --- the unsupervised approach is the more principled choice, as it does not require labelled outbreak examples for training.
 
@@ -459,13 +451,13 @@ That said, PSD is not a complete one-number summary, for the same reason no dete
 
 ## 6. Conclusion and Recommendations
 
-This study compared 13 unsupervised anomaly detection methods and their OR-vote ensembles on simulated syndromic surveillance data across three outbreak magnitudes. The principal findings are:
+This study compared 11 unsupervised anomaly detection methods and their OR-vote ensembles on simulated syndromic surveillance data across three outbreak magnitudes. The principal findings are:
 
 1. Density and distance-based methods on a 20-dimensional tabular feature space (KNN, Isolation Forest, LOF, OCSVM) constitute the strongest individual detectors, with KNN achieving the highest sensitivity at large outbreaks (0.854) and all tabular methods exhibiting the strongest positive scaling with outbreak magnitude.
 
-2. OR-vote ensembles combining detectors from different methodological families substantially outperform any individual method at small outbreak magnitudes, reaching test sensitivity 0.78--0.81 (at specificity $\approx 0.93$) against 0.615 for the best single detector. The advantage is statistically reliable (paired cluster bootstrap over 16 signals, 95% CI on the ensemble--KNN difference $[+0.038, +0.186]$) but is purchased at a specificity cost (ensembles operate near 0.93--0.95 versus $\approx 0.97$ for single detectors), and it diminishes at large magnitudes, where individual tabular methods approach ensemble performance.
+2. OR-vote ensembles combining detectors from different methodological families substantially outperform any individual method at small outbreak magnitudes, reaching test sensitivity 0.77--0.78 (at specificity $\approx 0.93$) against 0.615 for the best single detector. The advantage is statistically reliable (paired cluster bootstrap over 16 signals, 95% CI on the ensemble--KNN difference $[+0.038, +0.186]$) but is purchased at a specificity cost (ensembles operate near 0.93--0.95 versus $\approx 0.97$ for single detectors), and it diminishes at large magnitudes, where individual tabular methods approach ensemble performance.
 
-3. Ensemble configurations were selected on the validation partition and reported on the test partition to avoid selection-on-test bias; this and the correction of an alarm-magnitude alignment error reduced the Farrington-containing ensemble figures by 8--17 percentage points relative to an earlier test-selected analysis. After correction, the strongest GPU-free high-sensitivity ensemble is IF + LSTM-AE + NB-HMM + Noufaily (test sensitivity 0.808), and the most economical competitive option is Farrington + IF + NB-HMM (0.725, no GPU). The all-cheap statistical ensemble Farrington + NB-HMM attains the highest specificity (0.962) at sensitivity 0.615.
+3. Ensemble configurations were selected on the validation partition and reported on the test partition to avoid selection-on-test bias; this and the correction of an alarm-magnitude alignment error reduced the Farrington-containing ensemble figures by 8--17 percentage points relative to an earlier test-selected analysis. After correction, the strongest high-sensitivity ensemble is Farrington + IF + LSTM-AE + NB-HMM (test sensitivity 0.783), with the Farrington-free IF + LSTM-AE + NB-HMM close behind (0.770); the most economical competitive option is Farrington + IF + NB-HMM (0.725, no GPU). The all-cheap statistical ensemble Farrington + NB-HMM attains the highest specificity (0.962) at sensitivity 0.615.
 
 4. CUSUM and BOCPD-residual do not benefit from larger outbreaks and should not be relied upon as standalone detectors. NB-HMM is the strongest statistical detector, consistently outperforming Farrington by 8--10 sensitivity points.
 
@@ -483,7 +475,7 @@ Table 9 summarises the recommended configurations for different deployment scena
 
 | Scenario | Recommended method | Sensitivity | Timeliness | FPR | Cost |
 |----------|-------------------|:-----------:|:----------:|:---:|------|
-| Maximum sensitivity (any cost) | IF + LSTM-AE + NB-HMM + Noufaily (OR-vote) | 0.808 / --- / --- | 0.107 / --- / --- | 0.075 | expensive |
+| Maximum sensitivity (any cost) | Farrington + IF + LSTM-AE + NB-HMM (OR-vote) | 0.783 / 0.857 / 0.903 | 0.141 / 0.094 / 0.059 | 0.068 | expensive |
 | Best overall, GPU-free | Farrington + IF + NB-HMM (OR-vote) | 0.725 / --- / --- | 0.095 / --- / --- | 0.055 | medium |
 | Highest specificity ensemble | Farrington + NB-HMM (OR-vote) | 0.615 / --- / --- | 0.226 / --- / --- | 0.038 | cheap |
 | Best single detector | KNN (per-signal tuned) | 0.615 / 0.750 / 0.854 | 0.281 / 0.178 / 0.099 | 0.027 | medium |
