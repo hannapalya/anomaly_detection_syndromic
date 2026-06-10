@@ -1,0 +1,14 @@
+# Python dependencies for the syndromic anomaly-detection pipeline.
+# Versions are those used to produce the results in the paper.
+# Install with:  pip install -r requirements.txt
+#
+# The Farrington Flexible baseline additionally requires R (>= 4.0) with the
+# `surveillance` package (1.24.1). See README.md > Setup.
+
+numpy==2.4.3
+pandas==3.0.1
+scikit-learn==1.7.2
+scipy==1.16.2
+statsmodels==0.14.5
+torch==2.9.1
+matplotlib==3.10.6

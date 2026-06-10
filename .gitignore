@@ -1,0 +1,126 @@
+# ============================================================================
+# Large simulation data — see DATA.md (NOT committed; ~104 MB per magnitude)
+# ============================================================================
+big_signal_datasets_small/
+big_signal_datasets_medium/
+big_signal_datasets_large/
+signal_datasets_medium/
+signal_datasets_large/
+
+# ============================================================================
+# Generated outputs, score caches, and intermediate artifacts
+# (regenerate with `make all` — see README.md)
+# ============================================================================
+results/
+cloud_out/
+score_cache/
+*_inputs/
+splits_for_r.json
+train_val_test_split*.json
+
+# All generated CSVs (per-sim score caches, alarm matrices, per-signal tables).
+# Source data lives in the ignored dataset dirs above; keep small tracked CSVs explicit.
+*.csv
+!Bankholidays.csv
+!signal_datasets/**
+
+# ============================================================================
+# Scratch documents, build artifacts, logs, archives, media
+# ============================================================================
+# Directories of non-code material
+Comparison of statistical algorithms*/
+slides/
+presentation/
+logs/
+figs/
+data-raw/
+data-processed/
+rerun/
+
+# Build artifacts / logs / archives / data blobs / media
+*.pdf
+*.html
+*.zip
+*.zip.bak*
+*.tgz
+*.rds
+*.pptx
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.txt
+!requirements.txt
+!cloud/requirements.txt
+IF_new_threshold.
+results_isof_100sim.summary.json
+
+# ============================================================================
+# Source code: commit ONLY the paper's canonical scripts (see README > Methods).
+# Experimental / exploratory scripts are intentionally excluded so that
+# `git add -A` stages exactly the paper pipeline. To add a NEW pipeline script,
+# whitelist it here.
+# ============================================================================
+*.py
+*.R
+*.ipynb
+*.sh
+
+# shared infrastructure
+!anom_common.py
+!r_comparator_metrics.py
+!export_splits_for_r.py
+# detectors
+!IsolationForest.py
+!run_knn.py
+!run_lof.py
+!run_ocsvm.py
+!run_nbhmm.py
+!run_cusum.py
+!run_bocpd_residual.py
+!run_ratechange_residual.py
+!run_vae_count.py
+!cache_lstm_ae_prod_scores.py
+!run_farrington_custom.R
+!collect_farrington_metrics.py
+# residual-feature variant
+!run_residual_ml.py
+# ensembles
+!search_ensembles.py
+!fix_ensemble_val_selection.py
+!run_unsup_or_ensemble.py
+# aggregation / tables
+!collect_all_results.py
+!build_robustness_table.py
+!generate_per_signal_table.py
+!analyse_timely_detection.py
+!analyse_pod_timeliness.py
+# cloud metric helpers (turn cached deep-model scores into per-signal tables)
+!cloud/compute_lstm_alone_metrics.py
+!cloud/compute_vae_alone_metrics.py
+# orchestration + smoke test + legacy archive
+!run_all.sh
+!smoke_test.py
+!legacy/*.ipynb
+
+# ============================================================================
+# Environment / editor / OS
+# ============================================================================
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.Rhistory
+.Rproj.user/
+.venv/
+venv/
+env/
+.claude/
+.idea/
+.vscode/

@@ -1,0 +1,11 @@
+# Loosely-pinned. Colab pre-installs many of these; we only need pip to install
+# what's missing or below our minimum. statsmodels/torch/xgboost on Colab are
+# usually fine; stumpy is the main thing we need pip to install.
+numpy>=1.26
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+statsmodels>=0.14
+torch>=2.0          # Colab usually has 2.5+; no upper pin
+xgboost>=2.0
+stumpy>=1.13
