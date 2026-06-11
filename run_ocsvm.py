@@ -157,7 +157,7 @@ if __name__ == "__main__":
             print("  no test features; skip"); continue
         Xte_s = scaler.transform(Xte)
         test_scores = ocs.decision_function(Xte_s)
-        thr_test = np.percentile(test_scores, c_best * 100)
+        thr_test = best['thr_val']
         yhat_test = (test_scores <= thr_test).astype(int)
         A_list, ofs = [], 0
         for L in test_lengths:

@@ -255,7 +255,8 @@ def fig_duration():
 # FIGURE 4 — HEADLINE COMPARISON with bootstrap 95% CI (range-frame)
 # =====================================================================
 def fig_headline_ci():
-    # Values from fix_headline_bootstrap.py (paired cluster bootstrap, B=10000)
+    # Paired cluster-bootstrap summary values (B=10000); keep in sync with
+    # results/headline_bootstrap_per_signal.csv when regenerating this figure.
     rows = [
         ("Ensemble\n(Farr+IF+NB-HMM)", 0.725, 0.647, 0.795),
         ("KNN (best single)", 0.615, 0.506, 0.722),

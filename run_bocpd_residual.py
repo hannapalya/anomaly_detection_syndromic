@@ -203,7 +203,7 @@ def evaluate_and_cache_signal(S, log_path, save_cache=True):
         score_v = (W_SENS * (sens_v if not np.isnan(sens_v) else 0)
                    + W_SPEC * (spec_v if not np.isnan(spec_v) else 0))
         # Compute test metrics
-        thr_test_neg = np.percentile((-test_block).flatten(order="F"), c * 100)
+        thr_test_neg = thr_val_neg
         thr_t_anom = -thr_test_neg
         yhat_t = (test_block.flatten(order="F") >= thr_t_anom).astype(int)
         A_tlist, ofs = [], 0

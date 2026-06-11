@@ -235,10 +235,9 @@ def evaluate_signal(S, log_path=None, save_cache=True):
         score_v = (W_SENS * (sens_v if not np.isnan(sens_v) else 0.0)
                    + W_SPEC * (spec_v if not np.isnan(spec_v) else 0.0))
 
-        # Test eval at the SAME contamination but threshold computed on test
-        # scores (consistent with BOCPD-residual / CUSUM convention).
+        # Test eval at the validation-selected numeric threshold.
         test_for_tune = (-test_block).flatten(order="F")
-        thr_test_neg = np.percentile(test_for_tune, c_thr * 100)
+        thr_test_neg = thr_val_neg
         thr_anom_t = -thr_test_neg
         yhat_t = (test_block.flatten(order="F") >= thr_anom_t).astype(int)
         A_tlist, ofs = [], 0

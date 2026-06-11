@@ -1,312 +1,459 @@
 #!/usr/bin/env python3
 """
-Residual-based ML feature variant for IF and KNN.
+Residual-feature variants for the four tabular detectors.
 
-Pipeline per (signal, sim):
-  1. Fit a Negative-Binomial seasonal+DOW baseline on the first 6 years
-     (TRAIN_DAYS) of THIS sim's count series.
-  2. Compute Pearson residuals on the entire 7-year series — these strip
-     out the seasonal cycle, day-of-week effects, and baseline magnitude.
-  3. Build the standard 20-dim sliding-window feature matrix on the
-     residual stream instead of the raw counts.
-  4. Train IF and KNN on the residual features from train sims.
-  5. Score val and test using the same residual features.
-
-This is the variant that should help ML methods on highly seasonal signals
-(rhinitis, heat stroke, insect bites, arthropod bites) where vanilla
-features confound seasonal peaks with outbreak anomalies.
+For each simulation, a Negative-Binomial seasonal+DOW baseline is fitted on the
+first six years. The standard 20-dimensional sliding-window feature vector is
+then constructed from Pearson residuals rather than raw counts. The detector
+families, hyperparameter grids, validation calibration, and test evaluation
+match the raw-count tabular runners.
 
 Outputs:
   results/IF_residual_per_sig_big_{MAG}.csv
   results/KNN_residual_per_sig_big_{MAG}.csv
-
-Per-magnitude (set via SYND_DATA_DIR env var).
+  results/LOF_residual_per_sig_big_{MAG}.csv
+  results/OCSVM_residual_per_sig_big_{MAG}.csv
 """
 import os
+import argparse
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from sklearn.ensemble import IsolationForest
-from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import LocalOutlierFactor, NearestNeighbors
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import OneClassSVM
+from sklearn.utils.validation import check_is_fitted
 
 from anom_common import (
-    load_data, split_60_20_20,
-    create_residual_features, fit_nb_baseline, pearson_residuals,
-    compute_sensitivity_R, compute_specificity_R, compute_fpr_R,
-    compute_pod_R, compute_timeliness_R,
-    tune_contamination_threshold,
-    TRAIN_DAYS, VALID_DAYS, ABS_START, ABS_END, WIN_LEN,
-    IDX_RANGE, RNG_STATE, SIGNALS, SPEC_TARGET, W_SENS, W_SPEC,
+    load_data, split_60_20_20, create_features, fit_nb_baseline,
+    pearson_residuals, compute_sensitivity_R, compute_specificity_R,
+    compute_fpr_R, compute_pod_R, compute_timeliness_R,
+    tune_contamination_threshold, TRAIN_DAYS, VALID_DAYS, ABS_START, ABS_END,
+    WIN_LEN, IDX_RANGE, RNG_STATE, SIGNALS, SPEC_TARGET, W_SENS, W_SPEC,
     MAG_TAG,
 )
 
 
-WINDOW_SIZE = 14   # sliding window for feature engineering
-N_TREES = 200      # IF
-K_NEI = 10         # KNN
+METHOD_ORDER = ("IF", "KNN", "LOF", "OCSVM")
+
+IF_GRID = [
+    dict(window=7, n_estimators=200, max_samples=0.7, max_features=0.6),
+    dict(window=7, n_estimators=500, max_samples=0.9, max_features=0.8),
+    dict(window=14, n_estimators=200, max_samples=0.9, max_features=0.6),
+    dict(window=14, n_estimators=500, max_samples=0.7, max_features=0.8),
+    dict(window=21, n_estimators=200, max_samples=0.7, max_features=0.8),
+    dict(window=21, n_estimators=500, max_samples=0.9, max_features=0.6),
+]
+
+KNN_GRID = [
+    dict(window=7, k=5),
+    dict(window=7, k=15),
+    dict(window=14, k=10),
+    dict(window=21, k=10),
+]
+
+LOF_GRID = [
+    dict(window=7, n_neighbors=10),
+    dict(window=7, n_neighbors=20),
+    dict(window=14, n_neighbors=20),
+    dict(window=21, n_neighbors=30),
+]
+
+OCSVM_GRID = [
+    dict(window=7, gamma="scale", nu=0.03),
+    dict(window=7, gamma="scale", nu=0.05),
+    dict(window=14, gamma="scale", nu=0.03),
+    dict(window=14, gamma="scale", nu=0.05),
+    dict(window=21, gamma="scale", nu=0.05),
+]
 
 
-class KNNAnomaly:
-    def __init__(self, k=K_NEI):
-        self.k = k
-        self._nn = NearestNeighbors(n_neighbors=k, n_jobs=-1)
+class KNNAnomalyDetector:
+    def __init__(self, n_neighbors=20, metric="minkowski", n_jobs=1):
+        self.n_neighbors = n_neighbors
+        self.metric = metric
+        self.n_jobs = n_jobs
+        self._nn = None
 
-    def fit(self, X):
-        self._nn.fit(X)
+    def fit(self, X, y=None):
+        self._nn = NearestNeighbors(
+            n_neighbors=self.n_neighbors,
+            metric=self.metric,
+            n_jobs=self.n_jobs,
+        )
+        self._nn.fit(np.asarray(X, dtype=float))
         return self
 
-    def score_samples(self, X):
-        d, _ = self._nn.kneighbors(X)
-        return -d.mean(axis=1)   # higher = more normal (smaller distance)
+    def decision_function(self, X):
+        check_is_fitted(self._nn)
+        distances, _ = self._nn.kneighbors(
+            np.asarray(X, dtype=float), n_neighbors=self.n_neighbors
+        )
+        return -distances[:, -1]
+
+
+class LOFNovelty:
+    def __init__(self, n_neighbors=20, metric="minkowski", n_jobs=1):
+        self.n_neighbors = n_neighbors
+        self.metric = metric
+        self.n_jobs = n_jobs
+        self._lof = None
+
+    def fit(self, X, y=None):
+        self._lof = LocalOutlierFactor(
+            n_neighbors=self.n_neighbors,
+            contamination="auto",
+            novelty=True,
+            metric=self.metric,
+            n_jobs=self.n_jobs,
+        )
+        self._lof.fit(np.asarray(X, dtype=float))
+        return self
+
+    def decision_function(self, X):
+        check_is_fitted(self._lof)
+        return self._lof.score_samples(np.asarray(X, dtype=float))
+
+
+def method_grid(method):
+    return {
+        "IF": IF_GRID,
+        "KNN": KNN_GRID,
+        "LOF": LOF_GRID,
+        "OCSVM": OCSVM_GRID,
+    }[method]
+
+
+def residual_series(d):
+    if "_resid_full" not in d:
+        x = np.asarray(d["x"], dtype=np.float64)
+        params, dispersion = fit_nb_baseline(x[:TRAIN_DAYS])
+        d["_resid_full"] = pearson_residuals(x, params, dispersion, start=0)
+    return d["_resid_full"]
 
 
 def build_features_for_sim(d, window_size):
-    """Return tuple (train_feats, val_feats, test_feats, val_labels_aligned,
-    test_labels_aligned).
+    x = np.asarray(d["x"], dtype=np.float64)
+    y = np.asarray(d["y"], dtype=np.int32)
+    resid_full = residual_series(d)
 
-    train_feats: residual features on FIRST TRAIN_DAYS (no outbreak contamination)
-    val_feats:   residual features on last VALID_DAYS (used to tune threshold)
-    test_feats:  residual features on test window [ABS_START:ABS_END]
-
-    Baseline parameters are fitted on first TRAIN_DAYS of THIS sim.
-    """
-    x = np.asarray(d['x'], dtype=np.float64)
-    y = np.asarray(d['y'], dtype=np.int32)
-
-    # Fit baseline on training portion (no outbreak contamination)
-    params, dispersion = fit_nb_baseline(x[:TRAIN_DAYS])
-    resid_full = pearson_residuals(x, params, dispersion, start=0)
-
-    # Build features on three windows. For ML training we use the residual
-    # stream of the training portion (with WINDOW_SIZE-1 days of context).
-    from anom_common import create_features
-
-    # Train: residuals on first TRAIN_DAYS
     train_feats = create_features(resid_full[:TRAIN_DAYS], window_size)
 
-    # Val: take last VALID_DAYS days WITH a window of context before
     val_ctx_start = len(x) - VALID_DAYS - (window_size - 1)
     if val_ctx_start < 0:
-        val_feats = None; val_labels = None
+        val_feats, val_labels = None, None
     else:
-        val_resid = resid_full[val_ctx_start: len(x)]
+        val_resid = resid_full[val_ctx_start:len(x)]
         val_feats = create_features(val_resid, window_size)
-        # Align labels: features start at window_size-1 days into the ctx
-        # which equals val_ctx_start + (window_size-1) = len(x) - VALID_DAYS
-        val_labels = y[len(x) - VALID_DAYS: len(x)]
+        val_labels = y[len(x) - VALID_DAYS:len(x)]
 
-    # Test: ABS_START:ABS_END with leading window context
     test_ctx_start = ABS_START - (window_size - 1)
-    if test_ctx_start < 0:
-        test_feats = None; test_labels = None
+    if test_ctx_start < 0 or ABS_END > len(x):
+        test_feats, test_labels = None, None
     else:
-        test_resid = resid_full[test_ctx_start: ABS_END]
+        test_resid = resid_full[test_ctx_start:ABS_END]
         test_feats = create_features(test_resid, window_size)
         test_labels = y[ABS_START:ABS_END]
 
     return train_feats, val_feats, test_feats, val_labels, test_labels
 
 
-def evaluate_signal(S, methods=('IF', 'KNN')):
-    rng = np.random.RandomState(RNG_STATE)
-    # Burn through previous signals to keep RNG aligned with other runners
-    for prior in SIGNALS:
-        if prior == S:
-            break
-        Xp, _ = load_data(prior)
-        sims_p = []
-        for i, c in enumerate(Xp.columns):
-            x = Xp[c].to_numpy(np.float32, copy=False)
-            if len(x) >= TRAIN_DAYS + VALID_DAYS:
-                sims_p.append(dict(x=x, y=None, sim_idx=i))
-        if sims_p:
-            split_60_20_20(sims_p, rng)
-
-    Xsig, Ysig = load_data(S)
-    sims = []
-    for i, c in enumerate(Xsig.columns):
-        x = Xsig[c].to_numpy(np.float32, copy=False)
-        y = Ysig[c].to_numpy(np.int32, copy=False)
-        if len(x) >= TRAIN_DAYS + VALID_DAYS:
-            sims.append(dict(x=x, y=y, sim_idx=i))
-
-    train_sims, val_sims, test_sims = split_60_20_20(sims, rng)
-
-    # ---- Build train features ----
+def build_feature_blocks(train_sims, val_sims, test_sims, window_size):
     train_blocks = []
     for d in train_sims:
-        feats, _, _, _, _ = build_features_for_sim(d, WINDOW_SIZE)
+        feats, _, _, _, _ = build_features_for_sim(d, window_size)
         if feats is not None and len(feats):
             train_blocks.append(feats)
-    if not train_blocks:
-        return None
-    Xtr = np.concatenate(train_blocks, axis=0)
 
-    # ---- Build val features ----
-    val_feats_list, val_labels_list = [], []
+    val_blocks, val_labels, val_used = [], [], []
     for d in val_sims:
-        _, vf, _, vl, _ = build_features_for_sim(d, WINDOW_SIZE)
-        if vf is None or vl is None:
-            continue
-        val_feats_list.append(vf)
-        val_labels_list.append(vl)
+        _, feats, _, labels, _ = build_features_for_sim(d, window_size)
+        if feats is not None and labels is not None and len(feats) == len(labels):
+            val_blocks.append(feats)
+            val_labels.append(labels)
+            val_used.append(d)
 
-    # ---- Build test features ----
-    test_feats_list, test_labels_list, test_sim_indices = [], [], []
+    test_blocks, test_labels, test_used = [], [], []
     for d in test_sims:
-        _, _, tf, _, tl = build_features_for_sim(d, WINDOW_SIZE)
-        if tf is None or tl is None:
-            continue
-        test_feats_list.append(tf)
-        test_labels_list.append(tl)
-        test_sim_indices.append(d['sim_idx'])
+        _, _, feats, _, labels = build_features_for_sim(d, window_size)
+        if feats is not None and labels is not None and len(feats) == len(labels):
+            test_blocks.append(feats)
+            test_labels.append(labels)
+            test_used.append(d)
 
-    if not val_feats_list or not test_feats_list:
-        return None
+    return dict(
+        Xtr=np.concatenate(train_blocks, axis=0) if train_blocks else np.empty((0, 20), np.float32),
+        Xval=np.concatenate(val_blocks, axis=0) if val_blocks else np.empty((0, 20), np.float32),
+        Xte=np.concatenate(test_blocks, axis=0) if test_blocks else np.empty((0, 20), np.float32),
+        val_lengths=[len(v) for v in val_blocks],
+        test_lengths=[len(t) for t in test_blocks],
+        val_labels=val_labels,
+        test_labels=test_labels,
+        val_sims=val_used,
+        test_sims=test_used,
+    )
 
-    scaler = StandardScaler().fit(Xtr)
-    Xtr_s = scaler.transform(Xtr)
 
-    # Build val/test matrices per-sim so we can split scores back
-    val_lengths = [len(v) for v in val_feats_list]
-    test_lengths = [len(t) for t in test_feats_list]
-    Xval = scaler.transform(np.concatenate(val_feats_list, axis=0))
-    Xte = scaler.transform(np.concatenate(test_feats_list, axis=0))
+def fit_model(method, params, Xtr):
+    fit_X = Xtr
+    if method == "OCSVM" and len(fit_X) > 30000:
+        idx = np.random.RandomState(RNG_STATE).choice(len(fit_X), 30000, replace=False)
+        fit_X = fit_X[idx]
 
-    # Stack labels for R-comparator metrics
-    O_full_val = np.stack([d['y'] for d in val_sims], axis=1)
-    O_full_test = np.stack([d['y'] for d in test_sims], axis=1)
+    scaler = StandardScaler().fit(fit_X)
+    fit_X_scaled = scaler.transform(fit_X)
 
+    if method == "IF":
+        model = IsolationForest(
+            n_estimators=params["n_estimators"],
+            contamination=0.05,
+            max_samples=params["max_samples"],
+            max_features=params["max_features"],
+            random_state=RNG_STATE,
+            n_jobs=1,
+            bootstrap=False,
+        ).fit(fit_X_scaled)
+    elif method == "KNN":
+        model = KNNAnomalyDetector(n_neighbors=params["k"], n_jobs=1).fit(fit_X_scaled)
+    elif method == "LOF":
+        model = LOFNovelty(n_neighbors=params["n_neighbors"], n_jobs=1).fit(fit_X_scaled)
+    elif method == "OCSVM":
+        model = OneClassSVM(
+            kernel="rbf",
+            gamma=params["gamma"],
+            nu=params["nu"],
+            cache_size=500,
+        ).fit(fit_X_scaled)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    return model, scaler
+
+
+def score_model(model, scaler, X):
+    if not len(X):
+        return np.array([], dtype=float)
+    return model.decision_function(scaler.transform(X))
+
+
+def split_scores(scores, lengths):
+    cols = []
+    offset = 0
+    for length in lengths:
+        cols.append(scores[offset:offset + length])
+        offset += length
+    return np.column_stack(cols) if cols else np.empty((0, 0), dtype=float)
+
+
+def validation_objective(val_sims, val_lengths, val_scores, contamination):
+    threshold = np.percentile(val_scores, contamination * 100)
+    yhat = (val_scores <= threshold).astype(int)
+    alarm_matrix = split_scores(yhat, val_lengths).astype(int)
+    if alarm_matrix.size == 0 or alarm_matrix.shape[1] != len(val_sims):
+        return -1.0, threshold, np.nan, np.nan
+
+    O_full = np.stack([d["y"] for d in val_sims], axis=1)
+    sensitivity = compute_sensitivity_R(alarm_matrix, O_full)
+    specificity = compute_specificity_R(alarm_matrix, O_full, IDX_RANGE)
+    if np.isnan(specificity):
+        score = -1.0
+    elif specificity >= SPEC_TARGET:
+        score = W_SENS * (0.0 if np.isnan(sensitivity) else sensitivity) + W_SPEC * specificity
+    else:
+        score = specificity
+    return score, threshold, sensitivity, specificity
+
+
+def evaluate_signal(signal, methods=METHOD_ORDER):
+    rng = np.random.RandomState(RNG_STATE)
+    for prior in SIGNALS:
+        if prior == signal:
+            break
+        Xp, _ = load_data(prior)
+        prior_sims = []
+        for i, column in enumerate(Xp.columns):
+            x = Xp[column].to_numpy(np.float32, copy=False)
+            if len(x) >= TRAIN_DAYS + VALID_DAYS:
+                prior_sims.append(dict(x=x, y=None, sim_idx=i))
+        if prior_sims:
+            split_60_20_20(prior_sims, rng)
+
+    Xsig, Ysig = load_data(signal)
+    sims = []
+    for i, column in enumerate(Xsig.columns):
+        x = Xsig[column].to_numpy(np.float32, copy=False)
+        y = Ysig[column].to_numpy(np.int32, copy=False)
+        if len(x) >= TRAIN_DAYS + VALID_DAYS:
+            sims.append(dict(x=x, y=y, sim=f"sig{signal}_sim{i}", sim_idx=i))
+
+    train_sims, val_sims, test_sims = split_60_20_20(sims, rng)
+    feature_cache = {}
     results_out = {}
 
     for method in methods:
-        if method == 'IF':
-            mdl = IsolationForest(
-                n_estimators=N_TREES,
-                contamination=0.03,
-                random_state=RNG_STATE,
-                n_jobs=-1,
-                max_samples=min(20000, len(Xtr_s)),
-            ).fit(Xtr_s)
-            val_scores = mdl.decision_function(Xval)   # higher = more normal
-            te_scores  = mdl.decision_function(Xte)
-        elif method == 'KNN':
-            mdl = KNNAnomaly(k=K_NEI).fit(Xtr_s)
-            val_scores = mdl.score_samples(Xval)
-            te_scores  = mdl.score_samples(Xte)
-        else:
+        best = None
+        for params in method_grid(method):
+            window_size = params["window"]
+            if window_size not in feature_cache:
+                feature_cache[window_size] = build_feature_blocks(
+                    train_sims, val_sims, test_sims, window_size
+                )
+            blocks = feature_cache[window_size]
+            if not len(blocks["Xtr"]) or not len(blocks["Xval"]) or not len(blocks["Xte"]):
+                continue
+            try:
+                model, scaler = fit_model(method, params, blocks["Xtr"])
+                val_scores = score_model(model, scaler, blocks["Xval"])
+            except Exception as exc:
+                print(f"  {method} params={params} failed: {exc}", flush=True)
+                continue
+
+            contamination = tune_contamination_threshold(
+                blocks["val_sims"],
+                blocks["val_lengths"],
+                val_scores,
+                spec_target=SPEC_TARGET,
+                w_sens=W_SENS,
+                w_spec=W_SPEC,
+            )
+            score, threshold, sensitivity, specificity = validation_objective(
+                blocks["val_sims"], blocks["val_lengths"], val_scores, contamination
+            )
+            if best is None or score > best["score"]:
+                best = dict(
+                    score=score,
+                    params=params,
+                    model=model,
+                    scaler=scaler,
+                    blocks=blocks,
+                    val_scores=val_scores,
+                    contamination=contamination,
+                    threshold=threshold,
+                    val_sensitivity=sensitivity,
+                    val_specificity=specificity,
+                )
+
+        if best is None:
+            print(f"  {method}-residual: no usable config", flush=True)
             continue
 
-        # Tune contamination threshold on validation (higher=normal convention)
-        c_best = tune_contamination_threshold(
-            val_sims, val_lengths, val_scores,
-            spec_target=SPEC_TARGET, w_sens=W_SENS, w_spec=W_SPEC,
+        blocks = best["blocks"]
+        test_scores = score_model(best["model"], best["scaler"], blocks["Xte"])
+        yhat_test = (test_scores <= best["threshold"]).astype(int)
+        A = split_scores(yhat_test, blocks["test_lengths"]).astype(int)
+        O = np.stack(blocks["test_labels"], axis=1)
+        O_full = np.stack([d["y"] for d in blocks["test_sims"]], axis=1)
+
+        metrics = dict(
+            sensitivity=compute_sensitivity_R(A, O_full),
+            specificity=compute_specificity_R(A, O_full, IDX_RANGE),
+            fpr=compute_fpr_R(A, O_full, IDX_RANGE),
+            pod=compute_pod_R(A, O_full),
+            timeliness=compute_timeliness_R(A, O_full),
+            contamination=best["contamination"],
+            threshold=best["threshold"],
+            val_sensitivity=best["val_sensitivity"],
+            val_specificity=best["val_specificity"],
+            **best["params"],
         )
-        thr = np.percentile(val_scores, c_best * 100)
+        results_out[method] = metrics
 
-        # Predict on test using same percentile threshold (computed against val
-        # distribution, applied to test scores). For fair comparison apply to
-        # test distribution directly.
-        thr_test = np.percentile(te_scores, c_best * 100)
-        yhat_te = (te_scores <= thr_test).astype(int)
+        method_key = method.lower()
+        cache_dir = f"score_cache/{method_key}_residual_{MAG_TAG}"
+        os.makedirs(cache_dir, exist_ok=True)
 
-        # Split into per-sim columns and column-stack into matrix
-        offset = 0
-        A_list = []
-        for L in test_lengths:
-            A_list.append(yhat_te[offset:offset + L])
-            offset += L
-        A = np.column_stack(A_list)
-
-        m = dict(
-            sensitivity=compute_sensitivity_R(A, O_full_test),
-            specificity=compute_specificity_R(A, O_full_test, IDX_RANGE),
-            fpr=compute_fpr_R(A, O_full_test, IDX_RANGE),
-            pod=compute_pod_R(A, O_full_test),
-            timeliness=compute_timeliness_R(A, O_full_test),
-            contamination=c_best,
+        val_score_mat = split_scores(best["val_scores"], blocks["val_lengths"])
+        test_score_mat = split_scores(test_scores, blocks["test_lengths"])
+        pd.DataFrame(
+            val_score_mat, columns=[f"sim_{i}" for i in range(val_score_mat.shape[1])]
+        ).to_csv(f"{cache_dir}/{method_key}_residual_val_scores_signal_{signal}.csv", index=False)
+        pd.DataFrame(
+            test_score_mat, columns=[f"sim_{i}" for i in range(test_score_mat.shape[1])]
+        ).to_csv(f"{cache_dir}/{method_key}_residual_test_scores_signal_{signal}.csv", index=False)
+        pd.DataFrame(A, columns=[f"sim_{i}" for i in range(A.shape[1])]).to_csv(
+            f"{cache_dir}/{method_key}_residual_alarms_signal_{signal}.csv", index=False
         )
-        results_out[method] = m
+        pd.DataFrame(O, columns=[f"sim_{i}" for i in range(O.shape[1])]).to_csv(
+            f"{cache_dir}/{method_key}_residual_outbreaks_signal_{signal}.csv", index=False
+        )
 
-        # Cache per-sim alarms + scores for downstream ensemble search
-        import os as _os
-        cache_dir = f"score_cache/{method.lower()}_residual_{MAG_TAG}"
-        _os.makedirs(cache_dir, exist_ok=True)
-        # Build val scores matrix and test scores matrix (per-sim columns)
-        val_score_mat = np.column_stack([
-            val_scores[sum(val_lengths[:i]):sum(val_lengths[:i + 1])]
-            for i in range(len(val_lengths))
-        ])
-        test_score_mat = np.column_stack([
-            te_scores[sum(test_lengths[:i]):sum(test_lengths[:i + 1])]
-            for i in range(len(test_lengths))
-        ])
-        # Convention: higher = MORE NORMAL for these scorers (matches anom_common stacker convention)
-        pd.DataFrame(val_score_mat,
-                     columns=[f"sim_{i}" for i in range(val_score_mat.shape[1])]
-                     ).to_csv(f"{cache_dir}/val_scores_signal_{S}.csv", index=False)
-        pd.DataFrame(test_score_mat,
-                     columns=[f"sim_{i}" for i in range(test_score_mat.shape[1])]
-                     ).to_csv(f"{cache_dir}/test_scores_signal_{S}.csv", index=False)
-        pd.DataFrame(A, columns=[f"sim_{i}" for i in range(A.shape[1])]
-                     ).to_csv(f"{cache_dir}/alarms_signal_{S}.csv", index=False)
-        # Backward-compat flat path for small magnitude
         if MAG_TAG == "small":
-            pd.DataFrame(val_score_mat,
-                         columns=[f"sim_{i}" for i in range(val_score_mat.shape[1])]
-                         ).to_csv(f"{method.lower()}_residual_val_scores_signal_{S}.csv", index=False)
-            pd.DataFrame(test_score_mat,
-                         columns=[f"sim_{i}" for i in range(test_score_mat.shape[1])]
-                         ).to_csv(f"{method.lower()}_residual_test_scores_signal_{S}.csv", index=False)
-            pd.DataFrame(A, columns=[f"sim_{i}" for i in range(A.shape[1])]
-                         ).to_csv(f"{method.lower()}_residual_alarms_signal_{S}.csv", index=False)
+            pd.DataFrame(
+                val_score_mat, columns=[f"sim_{i}" for i in range(val_score_mat.shape[1])]
+            ).to_csv(f"{method_key}_residual_val_scores_signal_{signal}.csv", index=False)
+            pd.DataFrame(
+                test_score_mat, columns=[f"sim_{i}" for i in range(test_score_mat.shape[1])]
+            ).to_csv(f"{method_key}_residual_test_scores_signal_{signal}.csv", index=False)
+            pd.DataFrame(A, columns=[f"sim_{i}" for i in range(A.shape[1])]).to_csv(
+                f"{method_key}_residual_alarms_signal_{signal}.csv", index=False
+            )
+            pd.DataFrame(O, columns=[f"sim_{i}" for i in range(O.shape[1])]).to_csv(
+                f"{method_key}_residual_outbreaks_signal_{signal}.csv", index=False
+            )
 
     return results_out
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--signals", type=str, default=None,
+                        help="Comma-separated signal numbers. Default: all signals.")
+    parser.add_argument("--methods", type=str, default=None,
+                        help="Comma-separated methods from IF,KNN,LOF,OCSVM. Default: all.")
+    parser.add_argument("--merge", action="store_true",
+                        help="Merge subset results into existing per-signal CSVs.")
+    args = parser.parse_args()
+
+    target_signals = SIGNALS if args.signals is None else [
+        int(s.strip()) for s in args.signals.split(",") if s.strip()
+    ]
+    target_methods = METHOD_ORDER if args.methods is None else tuple(
+        m.strip().upper() for m in args.methods.split(",") if m.strip()
+    )
+    invalid_methods = sorted(set(target_methods) - set(METHOD_ORDER))
+    if invalid_methods:
+        raise ValueError(f"Unknown residual methods: {invalid_methods}")
+    merge_outputs = args.merge or set(target_signals) != set(SIGNALS)
+
     print(f"Residual-feature ML runner — magnitude={MAG_TAG}")
-    print(f"  Methods: IF, KNN  |  window_size={WINDOW_SIZE}  trees={N_TREES}  k={K_NEI}")
+    print(f"  Signals: {target_signals}")
+    print(f"  Methods: {', '.join(target_methods)}")
     print("=" * 80)
 
-    if_rows = []
-    knn_rows = []
-    for S in SIGNALS:
-        print(f"[sig {S}] processing...", flush=True)
+    rows = {method: [] for method in target_methods}
+    for signal in target_signals:
+        print(f"[sig {signal}] processing...", flush=True)
         try:
-            res = evaluate_signal(S)
-        except Exception as e:
+            result = evaluate_signal(signal, methods=target_methods)
+        except Exception as exc:
             import traceback
-            print(f"[sig {S}] FAILED: {e}", flush=True)
+            print(f"[sig {signal}] FAILED: {exc}", flush=True)
             traceback.print_exc()
             continue
-        if res is None:
-            print(f"[sig {S}] skipped (no valid features)")
+        for method, metrics in result.items():
+            print(
+                f"  {method}-residual: sens={metrics['sensitivity']:.3f} "
+                f"spec={metrics['specificity']:.3f} pod={metrics['pod']:.3f} "
+                f"tim={metrics['timeliness']:.3f}",
+                flush=True,
+            )
+            rows[method].append(dict(signal=signal, **metrics))
+
+    os.makedirs("results", exist_ok=True)
+    for method in target_methods:
+        if not rows[method]:
             continue
-        if 'IF' in res:
-            m = res['IF']
-            print(f"  IF-residual:  sens={m['sensitivity']:.3f} spec={m['specificity']:.3f} "
-                  f"pod={m['pod']:.3f} tim={m['timeliness']:.3f}", flush=True)
-            if_rows.append(dict(signal=S, **m))
-        if 'KNN' in res:
-            m = res['KNN']
-            print(f"  KNN-residual: sens={m['sensitivity']:.3f} spec={m['specificity']:.3f} "
-                  f"pod={m['pod']:.3f} tim={m['timeliness']:.3f}", flush=True)
-            knn_rows.append(dict(signal=S, **m))
-
-    if if_rows:
-        df_if = pd.DataFrame(if_rows).set_index('signal')
-        print("\n=== IF-RESIDUAL (per signal) ===")
-        print(df_if)
-        print("Means:\n", df_if.mean(numeric_only=True))
-        df_if.to_csv(f"results/IF_residual_per_sig_big_{MAG_TAG}.csv")
-        print(f"Wrote results/IF_residual_per_sig_big_{MAG_TAG}.csv")
-
-    if knn_rows:
-        df_knn = pd.DataFrame(knn_rows).set_index('signal')
-        print("\n=== KNN-RESIDUAL (per signal) ===")
-        print(df_knn)
-        print("Means:\n", df_knn.mean(numeric_only=True))
-        df_knn.to_csv(f"results/KNN_residual_per_sig_big_{MAG_TAG}.csv")
-        print(f"Wrote results/KNN_residual_per_sig_big_{MAG_TAG}.csv")
+        df = pd.DataFrame(rows[method]).set_index("signal")
+        out_path = f"results/{method}_residual_per_sig_big_{MAG_TAG}.csv"
+        if merge_outputs and os.path.exists(out_path):
+            previous = pd.read_csv(out_path)
+            signal_col = previous.columns[0]
+            previous = previous.set_index(signal_col)
+            previous.index = previous.index.astype(int)
+            previous = previous.drop(index=df.index, errors="ignore")
+            df = pd.concat([previous, df]).sort_index()
+        print(f"\n=== {method}-RESIDUAL (per signal) ===")
+        print(df)
+        print("Means:\n", df.mean(numeric_only=True))
+        df.to_csv(out_path)
+        print(f"Wrote {out_path}")

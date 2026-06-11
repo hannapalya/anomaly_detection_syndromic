@@ -2,9 +2,9 @@
 """
 CUSUM (Cumulative Sum) detector for syndromic surveillance.
 
-- Fixed seasonal baseline mu_t fitted by Poisson GLM on outbreak-free
+- Fixed seasonal baseline mu_t fitted by Negative-Binomial GLM on outbreak-free
   training-period days (annual + semi-annual harmonics + day-of-week).
-- Poisson-style standardised residual: r_t = (x_t - mu_t) / sqrt(mu_t + eps).
+- Pearson-style standardised residual: r_t = (x_t - mu_t) / sqrt(dispersion * mu_t + eps).
 - One-sided recursive CUSUM: S_t = max(0, S_{t-1} + r_t - k).
 - Score = -S_t (higher = more normal) so percentile-based contamination tuning
   in anom_common applies unchanged.
@@ -208,7 +208,7 @@ if __name__ == "__main__":
             continue
 
         scores_concat = np.concatenate(per_sim_scores)
-        thr_test = np.percentile(scores_concat, c_best * 100)
+        thr_test = thr_val
         yhat_concat = (scores_concat <= thr_test).astype(int)
 
         ofs = 0

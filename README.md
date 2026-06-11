@@ -90,7 +90,7 @@ aggregators consume.
 | Table 2 (sens/timeliness × 3 magnitudes)   | `build_robustness_table.py`                 | `results/ROBUSTNESS_table.csv` |
 | Table 3, 8 (ensembles, val-selected)       | `fix_ensemble_val_selection.py` (+ `search_ensembles.py`) | `results/ensemble_val_vs_test_selection.csv` |
 | Tables 6, 7 (per-signal sensitivity)       | `generate_per_signal_table.py`              | LaTeX to stdout |
-| Table 10 (residual-feature variant)        | `run_residual_ml.py`                        | `results/{IF,KNN}_residual_per_sig_big_<MAG>.csv` |
+| Table 10 (residual-feature variant)        | `run_residual_ml.py`                        | `results/{IF,KNN,LOF,OCSVM}_residual_per_sig_big_<MAG>.csv` |
 | Tables 11 / 11M / 11L, 12 (timely detection)| `analyse_timely_detection.py`              | `results/timely_detection_summary_<MAG>.csv`, `results/outbreak_duration_dist_<MAG>.csv` |
 | Table 9 (recommended configs)              | assembled by hand from Tables 2 & 8         | — |
 
@@ -98,9 +98,13 @@ aggregators consume.
 
 - Fixed seed `RNG_STATE = 42` for the simulation split; every method trains,
   tunes, and evaluates on identical partitions.
-- Per-method alarm thresholds are tuned on the **validation** partition by
+- Per-method operating points are calibrated on the **validation** partition by
   maximising `2·sensitivity + 3·specificity` subject to specificity ≥ 0.97.
-  Farrington runs at its fixed operating point (α = 0.01).
+  For score-based runners, the selected numeric validation cutoff is applied
+  unchanged to test scores. Farrington runs at its fixed operating point (α = 0.01).
 - Ensemble configurations are **selected on validation and reported on test**
   (no selection-on-test bias), and Farrington alarms are magnitude-aligned.
 - Evaluation window: the final 49 weeks, absolute day range `[2205, 2548)`.
+- After methodological changes to thresholding or residual features, run
+  `DATA_ROOT=/path/to/data-root ./rerun_methodology_corrections.sh` to regenerate
+  the affected CSVs and derived tables.

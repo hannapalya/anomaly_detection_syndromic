@@ -103,8 +103,12 @@ results_isof_100sim.summary.json
 # cloud metric helpers (turn cached deep-model scores into per-signal tables)
 !cloud/compute_lstm_alone_metrics.py
 !cloud/compute_vae_alone_metrics.py
+!cloud/run_methodology_colab.py
+!cloud/make_methodology_colab_bundle.sh
+!cloud/README-colab-methodology.md
 # orchestration + smoke test + legacy archive
 !run_all.sh
+!rerun_methodology_corrections.sh
 !smoke_test.py
 !legacy/*.ipynb
 

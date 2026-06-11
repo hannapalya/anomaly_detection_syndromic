@@ -121,7 +121,7 @@ if __name__ == "__main__":
         if not per_sim_scores:
             continue
         scores_concat = np.concatenate(per_sim_scores)
-        thr_test = np.percentile(scores_concat, c_best * 100)
+        thr_test = thr_val
         yhat_concat = (scores_concat <= thr_test).astype(int)
         A_list, ofs = [], 0
         for y_win in per_sim_labels:

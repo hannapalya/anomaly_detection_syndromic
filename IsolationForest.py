@@ -386,15 +386,7 @@ for S in SIGNALS:
     scaler = P["scaler"]
     Xtr_s = scaler.transform(Xtr)
 
-    iso_tuned = IsolationForest(
-        n_estimators=P['N_EST'],
-        contamination=best['contamination'],
-        max_samples=P['MAX_SAMP'],
-        max_features=P['MAX_FEAT'],
-        random_state=RNG_STATE,
-        n_jobs=-1,
-        bootstrap=False,
-    ).fit(Xtr_s)
+    iso_tuned = P["model"]
     print(f"  Isolation Forest trained on normal patterns from first {TRAIN_YEARS} years")
 
     # --------- Build TEST features for exact R window [ABS_START:ABS_END) ---------
@@ -429,7 +421,7 @@ for S in SIGNALS:
     # --------- Predict on TEST ---------
     if len(Xte_s):
         test_scores = iso_tuned.decision_function(Xte_s)  # higher = more normal
-        thr_test = np.percentile(test_scores, best['contamination']*100)
+        thr_test = best['thr_val']
         yhat_concat = (test_scores <= thr_test).astype(int)
 
         # Split back per-simulation (each sim contributes exactly WIN_LEN rows)

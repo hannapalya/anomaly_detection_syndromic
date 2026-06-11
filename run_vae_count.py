@@ -436,9 +436,9 @@ def evaluate_signal(S, log_path):
     sens_v = compute_sensitivity_R(A_v, O_full_val)
     spec_v = compute_specificity_R(A_v, O_full_val, IDX_RANGE)
 
-    # ---- Test alarms via same contamination percentile applied to test decision ----
+    # ---- Test alarms via validation-selected numeric decision threshold ----
     test_decision = -test_block.flatten(order="F")
-    thr_test_dec = np.percentile(test_decision, c * 100)
+    thr_test_dec = thr_val_dec
     yhat_t = (test_decision <= thr_test_dec).astype(int)
     A_tlist, ofs = [], 0
     for L in test_lengths:

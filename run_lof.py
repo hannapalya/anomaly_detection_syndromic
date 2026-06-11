@@ -331,7 +331,7 @@ if __name__ == "__main__":
 
         Xte_s = scaler.transform(Xte)
         test_scores = lof_tuned.decision_function(Xte_s)
-        thr_test = np.percentile(test_scores, best["contamination"] * 100)
+        thr_test = best["thr_val"]
         yhat_concat = (test_scores <= thr_test).astype(int)
 
         ofs = 0

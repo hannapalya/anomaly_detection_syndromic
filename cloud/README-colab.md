@@ -1,5 +1,10 @@
 # Running the robustness study on Google Colab
 
+For the current methodology-correction reruns (strict validation cutoffs plus
+the four-method residual-feature runner), use
+`cloud/README-colab-methodology.md`. The notes below describe the older
+robustness-study split between GPU and CPU notebooks.
+
 Three notebooks. Run them on separate Colab sessions in parallel if you can:
 
 | Notebook | Methods | Runtime needed | Wallclock estimate |
