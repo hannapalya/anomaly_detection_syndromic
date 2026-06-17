@@ -7,6 +7,9 @@ big_signal_datasets_large/
 signal_datasets_medium/
 signal_datasets_large/
 
+# Nested working copy used to build the Colab methodology bundle (not part of the repo)
+/syndromic/
+
 # ============================================================================
 # Generated outputs, score caches, and intermediate artifacts
 # (regenerate with `make all` — see README.md)
@@ -106,9 +109,13 @@ results_isof_100sim.summary.json
 !cloud/run_methodology_colab.py
 !cloud/make_methodology_colab_bundle.sh
 !cloud/README-colab-methodology.md
+!cloud/hetzner_up.sh
+!cloud/hetzner_down.sh
+!cloud/hetzner_watch.sh
 # orchestration + smoke test + legacy archive
 !run_all.sh
 !rerun_methodology_corrections.sh
+!parallel_residual.sh
 !smoke_test.py
 !legacy/*.ipynb
 
@@ -123,6 +130,7 @@ __pycache__/
 .Rhistory
 .Rproj.user/
 .venv/
+.venv_exp/
 venv/
 env/
 .claude/

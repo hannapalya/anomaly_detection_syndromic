@@ -74,6 +74,7 @@ algo.farrington=function (disProgObj, control = list(range = NULL, b = 3, w = 3,
   # ones where there are less than 5 reports in the last 4 weeks
   alarmall <- matrix(data = 0, nrow = length(control$range), ncol = 1)
   alarm<- matrix(data = 0, nrow = length(control$range), ncol = 1)
+  muhat <- matrix(data = NA_real_, nrow = length(control$range), ncol = 1)  # per-day Farrington baseline mu-hat
   upperbound <- matrix(data = 0, nrow = length(control$range), ncol = 1)
   trend <- matrix(data = 0, nrow = length(control$range), ncol = 1)
   pd <- matrix(data = 0, nrow = length(control$range), ncol = 2)
@@ -237,6 +238,7 @@ algo.farrington=function (disProgObj, control = list(range = NULL, b = 3, w = 3,
 
         X <- (observed[kk] - pred$fit)/(lu[2] - pred$fit)
         upperbound[k - min(control$range) + 1] <- lu[2]
+        muhat[k - min(control$range) + 1] <- pred$fit
         alarm[k - min(control$range) + 1] <- (X > 1)
         # if the last five weeks have less than 4 reports,
         # indicate that by returning the value 1e-300
@@ -250,7 +252,7 @@ algo.farrington=function (disProgObj, control = list(range = NULL, b = 3, w = 3,
   control$name <- paste("farrington(", control$w, ",", 0, ",", control$b, ")", sep = "")
   control$data <- paste(deparse(substitute(disProgObj)))
   result <- list(alarm = alarm, alarmall = alarmall, trend = trend,
-                 disProgObj = disProgObj, control = control,upperbound=upperbound)
+                 disProgObj = disProgObj, control = control,upperbound=upperbound, muhat=muhat)
   class(result) <- "survRes"
   return(result)
 }
@@ -353,7 +355,7 @@ DAYS <- 7
 VALID_DAYS <- 49 * 7   # 343
 
 splits <- fromJSON("splits_for_r.json")
-signals <- 1:16
+signals <- if (nzchar(Sys.getenv("SYND_SIGNALS"))) as.integer(strsplit(Sys.getenv("SYND_SIGNALS"), ",")[[1]]) else 1:16
 args <- commandArgs(trailingOnly = TRUE)
 alpha_val <- 0.01
 if (length(args) >= 1) alpha_val <- as.numeric(args[1])
@@ -387,6 +389,7 @@ for (S in signals) {
   alarm_mat    <- matrix(0L, nrow = VALID_DAYS, ncol = n_test)
   alarmall_mat <- matrix(0L, nrow = VALID_DAYS, ncol = n_test)
   out_mat      <- matrix(0L, nrow = VALID_DAYS, ncol = n_test)
+  muhat_mat    <- matrix(NA_real_, nrow = VALID_DAYS, ncol = n_test)  # Farrington baseline mu-hat per eval day
 
   cntrl <- list(range = (N - VALID_DAYS + 1):N,
                 w = 3, b = 5, alpha = alpha_val, trend = TRUE,
@@ -408,6 +411,7 @@ for (S in signals) {
     alarm_mat[, j]    <- av
     alarmall_mat[, j] <- aav
     out_mat[, j]      <- as.integer(outbreaks[(N - VALID_DAYS + 1):N, i])
+    muhat_mat[, j]    <- as.numeric(as.vector(a.f$muhat))
     if (j %% 25 == 0) {
       cat(sprintf("  sim %d/%d done (%.1fs elapsed)\n", j, n_test,
                   as.numeric(difftime(Sys.time(), t0, units = "secs"))))
@@ -422,7 +426,9 @@ for (S in signals) {
   write.csv(alarm_mat,    file = sprintf("farrington_%s_alarms_signal_%d.csv",    out_suffix, S), row.names = FALSE)
   write.csv(alarmall_mat, file = sprintf("farrington_%s_alarmsall_signal_%d.csv", out_suffix, S), row.names = FALSE)
   write.csv(out_mat,      file = sprintf("farrington_%s_outbreaks_signal_%d.csv", out_suffix, S), row.names = FALSE)
-  cat(sprintf("  saved (alarm/alarmsall/outbreaks)\n"))
+  colnames(muhat_mat) <- paste0("sim_", test_idx0)   # keyed by ORIGINAL sim index for Python alignment
+  write.csv(muhat_mat,    file = sprintf("farr_baseline_%s_signal_%d.csv", out_suffix, S), row.names = FALSE)
+  cat(sprintf("  saved (alarm/alarmsall/outbreaks/baseline)\n"))
 }
 
 cat("\nALL DONE.\n")

@@ -43,6 +43,9 @@ IF_GRID = [
     dict(window=14, n_estimators=500, max_samples=0.7, max_features=0.8),
     dict(window=21, n_estimators=200, max_samples=0.7, max_features=0.8),
     dict(window=21, n_estimators=500, max_samples=0.9, max_features=0.6),
+    dict(window=7, n_estimators=200, max_samples=256, max_features=1.0),
+    dict(window=14, n_estimators=200, max_samples=256, max_features=1.0),
+    dict(window=21, n_estimators=200, max_samples=256, max_features=1.0),
 ]
 
 KNN_GRID = [
