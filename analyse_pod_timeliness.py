@@ -49,6 +49,8 @@ SIGNAL_NAMES = {
 
 
 def load_alarm_matrix(method, S, n_test):
+    # Magnitude tag derived from the INPUT_DIR (== '' for small, '<mag>_inputs/' otherwise)
+    _mag = (INPUT_DIR.split('_inputs/')[0] or 'small')
     paths = {
         'Farrington': f'{INPUT_DIR}farrington_custom_alarms_signal_{S}.csv',
         'CUSUM': f'{INPUT_DIR}cusum_alarms_signal_{S}.csv',
@@ -57,6 +59,10 @@ def load_alarm_matrix(method, S, n_test):
         'OCSVM': f'{INPUT_DIR}ocsvm_alarms_signal_{S}.csv',
         'LOF': f'{INPUT_DIR}lof_alarms_signal_{S}.csv',
         'RateChange': f'{INPUT_DIR}ratechange_residual_alarms_signal_{S}.csv',
+        'R-IF':    f'score_cache/if_residual_{_mag}/if_residual_alarms_signal_{S}.csv',
+        'R-KNN':   f'score_cache/knn_residual_{_mag}/knn_residual_alarms_signal_{S}.csv',
+        'R-LOF':   f'score_cache/lof_residual_{_mag}/lof_residual_alarms_signal_{S}.csv',
+        'R-OCSVM': f'score_cache/ocsvm_residual_{_mag}/ocsvm_residual_alarms_signal_{S}.csv',
     }
     if method not in paths:
         return None

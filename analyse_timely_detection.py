@@ -47,22 +47,22 @@ INPUT_DIR = "" if MAG_TAG == "small" else f"{MAG_TAG}_inputs/"
 _VAE = (f'{INPUT_DIR}vae_{{kind}}_scores_signal_{{S}}.csv' if INPUT_DIR
         else 'cloud_out/vae_small/vae_{kind}_scores_signal_{S}.csv')
 
-METHODS_ALARM = ['Farrington', 'CUSUM', 'IF', 'KNN', 'OCSVM', 'LOF', 'RateChange']
+METHODS_ALARM = ['Farrington', 'CUSUM', 'IF', 'KNN', 'OCSVM', 'LOF', 'RateChange',
+                 'R-IF', 'R-KNN', 'R-LOF', 'R-OCSVM']
 METHODS_SCORE = {
     'LSTM-AE': dict(val=f'{INPUT_DIR}lstm_ae_val_scores_signal_{{S}}.csv',
                     test=f'{INPUT_DIR}lstm_ae_test_scores_signal_{{S}}.csv', higher_normal=False),
-    'NB-HMM': dict(val=f'{INPUT_DIR}nbhmm_val_scores_signal_{{S}}.csv',
-                   test=f'{INPUT_DIR}nbhmm_test_scores_signal_{{S}}.csv', higher_normal=True),
     'VAE': dict(val=_VAE.format(kind='val', S='{S}'),
                 test=_VAE.format(kind='test', S='{S}'), higher_normal=True),
     'BOCPD': dict(val=f'{INPUT_DIR}bocpd_resid_val_scores_signal_{{S}}.csv',
                   test=f'{INPUT_DIR}bocpd_resid_test_scores_signal_{{S}}.csv', higher_normal=True),
 }
 METHODS = ['Farrington', 'CUSUM', 'IF', 'KNN', 'OCSVM', 'LOF',
-           'LSTM-AE', 'NB-HMM', 'VAE', 'BOCPD', 'RateChange']
+           'R-IF', 'R-KNN', 'R-LOF', 'R-OCSVM',
+           'LSTM-AE', 'VAE', 'BOCPD', 'RateChange']
 
-ENSEMBLE_NAME = 'OR-ensemble (IF+LSTM-AE+NB-HMM)'
-ENSEMBLE_MEMBERS = ['IF', 'LSTM-AE', 'NB-HMM']
+ENSEMBLE_NAME = 'OR-ensemble (LSTM-AE+VAE)'
+ENSEMBLE_MEMBERS = ['LSTM-AE', 'VAE']
 
 D_MAX = 20          # day offsets 0..20  ->  "days since onset" 1..21
 LONG_MIN = 7        # outbreaks with duration >= 7 days

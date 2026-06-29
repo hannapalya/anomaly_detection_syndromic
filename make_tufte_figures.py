@@ -57,60 +57,109 @@ def range_frame(ax, xdata=None, ydata=None):
 # =====================================================================
 # FIGURE 1 — SLOPEGRAPH: sensitivity scaling across outbreak magnitudes
 # =====================================================================
-def fig_slopegraph():
-    # Verified cross-magnitude mean sensitivities (per-signal means)
-    data = {
-        "KNN":        [0.615, 0.750, 0.854],
-        "Isolation Forest": [0.523, 0.678, 0.827],
-        "LSTM-AE":    [0.569, 0.714, 0.813],
-        "OCSVM":      [0.464, 0.617, 0.787],
-        "NB-HMM":     [0.522, 0.633, 0.731],
-        "Farrington": [0.440, 0.556, 0.639],
-        "VAE":        [0.407, 0.500, 0.596],
-        "Noufaily":   [0.382, 0.457, 0.529],
-        "CUSUM":      [0.404, 0.459, 0.393],
-        "RateChange": [0.234, 0.272, 0.294],
-    }
+def _slopegraph(data, ylim, title, outname, value_fmt="{:.2f}"):
     cols = [0, 1, 2]
     labels = ["Small", "Medium", "Large"]
-
-    fig, ax = plt.subplots(figsize=(6.5, 7.2))
+    fig, ax = plt.subplots(figsize=(7.5, 8.4))
     for name, ys in data.items():
         ax.plot(cols, ys, "-", color=INK, lw=0.8, alpha=0.85)
         ax.plot(cols, ys, "o", color=INK, ms=2.5)
-    # Direct labels at both ends, value + name; de-collide by small vertical nudges
-    def place_labels(side_x, idx, ha, name_first):
+    def place_labels(side_x, idx, ha, name_first, anchor_x):
+        # bidirectional collision fix: nudge up, then if top is exceeded, slide cluster down
         items = sorted(data.items(), key=lambda kv: kv[1][idx])
-        last_y = -1
-        min_gap = 0.018
+        min_gap = (ylim[1] - ylim[0]) * 0.026
+        top_pad = (ylim[1] - ylim[0]) * 0.01
+        positions = []
+        last_y = -1e9
         for name, ys in items:
-            y = ys[idx]
-            yy = max(y, last_y + min_gap)
+            yy = max(ys[idx], last_y + min_gap)
             last_y = yy
-            if name_first:
-                txt = f"{name}  {ys[idx]:.2f}"
-            else:
-                txt = f"{ys[idx]:.2f}  {name}"
-            ax.text(side_x, yy, txt, ha=ha, va="center", fontsize=8, color=INK)
-
-    place_labels(-0.06, 0, "right", name_first=True)   # left labels: name then value
-    place_labels(2.06, 2, "left",  name_first=False)   # right labels: value then name
-
-    # Erase axes; keep only the three magnitude anchors as text
-    ax.set_xlim(-1.15, 3.1)
-    ax.set_ylim(0.18, 0.90)
+            positions.append([name, ys[idx], yy])
+        overflow = positions[-1][2] - (ylim[1] - top_pad)
+        if overflow > 0:
+            for i in range(len(positions) - 1, -1, -1):
+                positions[i][2] -= overflow
+                if i > 0 and positions[i][2] - positions[i-1][2] >= min_gap:
+                    break
+        for name, true_y, yy in positions:
+            v = value_fmt.format(true_y)
+            txt = f"{name}  {v}" if name_first else f"{v}  {name}"
+            ax.text(side_x, yy, txt, ha=ha, va="center", fontsize=7.5, color=INK)
+            # Leader line from label to true dot position; always draw so the
+            # eye can follow even tiny displacements
+            leader_start_x = side_x + (0.06 if ha == "right" else -0.06)
+            ax.plot([leader_start_x, anchor_x], [yy, true_y],
+                    color=INK, lw=0.5, alpha=0.55, solid_capstyle="round")
+    place_labels(-0.25, 0, "right", name_first=True,  anchor_x=-0.04)
+    place_labels(2.25,  2, "left",  name_first=False, anchor_x=2.04)
+    ax.set_xlim(-1.55, 3.55)
+    ax.set_ylim(*ylim)
     for x, lab in zip(cols, labels):
-        ax.text(x, 0.895, lab, ha="center", va="bottom", fontsize=9.5,
-                fontweight="bold", color=INK)
+        ax.text(x, ylim[1] + (ylim[1]-ylim[0])*0.04, lab, ha="center", va="bottom",
+                fontsize=9.5, fontweight="bold", color=INK)
     ax.axis("off")
-    ax.set_title("Detection sensitivity scales with outbreak magnitude\n"
-                 "(mean over 16 signals; lines connect each detector across the three magnitudes)",
-                 fontsize=10, loc="center", pad=14)
+    fig.suptitle(title, fontsize=10, y=0.985)
     fig.tight_layout()
     for ext in ("pdf", "png"):
-        fig.savefig(f"{FIGS}/tufte_slopegraph_magnitude.{ext}", bbox_inches="tight")
+        fig.savefig(f"{FIGS}/{outname}.{ext}", bbox_inches="tight")
     plt.close(fig)
-    print("  tufte_slopegraph_magnitude")
+    print(f"  {outname}")
+
+
+def fig_slopegraph():
+    # Cross-magnitude mean sensitivities (per-signal means; matches Table 2)
+    data = {
+        "R-KNN":      [0.720, 0.812, 0.871],
+        "R-IF":       [0.650, 0.787, 0.869],
+        "KNN":        [0.615, 0.750, 0.854],
+        "R-OCSVM":    [0.612, 0.754, 0.847],
+        "R-LOF":      [0.626, 0.768, 0.847],
+        "IF":         [0.525, 0.682, 0.828],
+        "LOF":        [0.561, 0.703, 0.822],
+        "LSTM-AE":    [0.570, 0.711, 0.816],
+        "OCSVM":      [0.464, 0.617, 0.787],
+        "OR-ens (LSTM-AE+VAE)": [0.569, 0.687, 0.773],
+        "Farrington": [0.440, 0.556, 0.639],
+        "VAE":        [0.424, 0.516, 0.611],
+        "R-CUSUM":     [0.404, 0.460, 0.393],
+        "CUSUM":       [0.243, 0.307, 0.315],
+        "R-RateChange":[0.234, 0.272, 0.294],
+        "RateChange":  [0.188, 0.218, 0.249],
+        "R-BOCPD":     [0.175, 0.212, 0.291],
+        "BOCPD":       [0.133, 0.154, 0.202],
+    }
+    _slopegraph(
+        data, ylim=(0.10, 0.90),
+        title="Sensitivity across outbreak magnitudes",
+        outname="tufte_slopegraph_magnitude")
+
+
+def fig_slopegraph_psd():
+    # Cross-magnitude pooled PSD-within-5d (matches Tables 11, 11M, 11L)
+    data = {
+        "R-RateChange":[0.91, 0.97,  0.99],
+        "OR-ens (LSTM-AE+VAE)": [0.84, 0.93, 0.989],
+        "R-KNN":      [0.84,  0.94,  0.984],
+        "R-IF":       [0.84,  0.93,  0.981],
+        "R-BOCPD":    [0.83,  0.92,  0.98],
+        "RateChange": [0.80,  0.89,  0.96],
+        "KNN":        [0.78,  0.87,  0.97],
+        "R-OCSVM":    [0.78,  0.90,  0.979],
+        "IF":         [0.78,  0.90,  0.985],
+        "VAE":        [0.77,  0.87,  0.94],
+        "BOCPD":      [0.76,  0.86,  0.95],
+        "R-LOF":      [0.72,  0.87,  0.978],
+        "OCSVM":      [0.68,  0.82,  0.98],
+        "LSTM-AE":    [0.65,  0.77,  0.92],
+        "LOF":        [0.64,  0.84,  0.95],
+        "Farrington": [0.62,  0.78,  0.94],
+        "R-CUSUM":    [0.48,  0.51,  0.30],
+        "CUSUM":      [0.28,  0.30,  0.25],
+    }
+    _slopegraph(
+        data, ylim=(0.20, 1.02),
+        title="PSD$_5$ across outbreak magnitudes",
+        outname="tufte_slopegraph_psd_magnitude")
 
 
 # =====================================================================
@@ -438,8 +487,12 @@ def fig_timely_detection(mag="small"):
     SPEC = dict(zip(summ.method, summ.specificity))
 
     # ink, labelled focus set; everything else drawn faint for context
-    FOCUS = ["OR-ensemble (IF+LSTM-AE+NB-HMM)", "KNN", "RateChange", "IF", "Farrington", "CUSUM"]
-    SHORT = {"OR-ensemble (IF+LSTM-AE+NB-HMM)": "OR-ensemble"}
+    FOCUS = ["OR-ensemble (LSTM-AE+VAE)", "R-KNN", "R-IF", "RateChange", "KNN",
+             "IF", "BOCPD", "Farrington", "CUSUM"]
+    SHORT = {"OR-ensemble (LSTM-AE+VAE)": "OR-ens (LSTM-AE+VAE)",
+             "RateChange": "R-RateChange",
+             "BOCPD":      "R-BOCPD",
+             "CUSUM":      "R-CUSUM"}
     all_methods = [m for m in cur["method"].unique() if m in SPEC]
 
     # two panels share the probability (y) axis: left = PSD(d) curve, right = the
@@ -503,10 +556,8 @@ def fig_timely_detection(mag="small"):
     range_frame(axR, xdata=[smin, smax])
     axR.set_xlabel("Specificity")
 
-    fig.suptitle(f"Timely detection and its false-alarm cost --- {mag} outbreak magnitude\n"
-                 "left: probability of catching the outbreak within $d$ days (PSD, rising to POD); "
-                 "right: the specificity that catch rate costs",
-                 fontsize=10, y=1.0)
+    fig.suptitle(f"PSD($d$) at {mag} outbreak magnitude",
+                 fontsize=11, y=0.99)
     fig.subplots_adjust(top=0.86, bottom=0.10, left=0.085, right=0.83)
     for ext in ("pdf", "png"):
         fig.savefig(f"{FIGS}/tufte_timely_detection{suf}.{ext}", bbox_inches="tight")
@@ -517,6 +568,7 @@ def fig_timely_detection(mag="small"):
 if __name__ == "__main__":
     print("Building Tufte-style figures:")
     fig_slopegraph()
+    fig_slopegraph_psd()
     fig_persignal_dotplot()
     fig_headline_ci()
     fig_scorecard()
