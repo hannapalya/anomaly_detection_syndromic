@@ -23,7 +23,6 @@ simulated daily syndromic-surveillance data, across three outbreak magnitudes
 | | Variational Autoencoder (NegBin) | `run_vae_count.py` |
 | Seasonal-baseline statistical | Farrington Flexible (α=0.01) | `run_farrington_custom.R` → `collect_farrington_metrics.py` |
 | | CUSUM (NB seasonal) | `run_cusum.py` |
-| | NB-HMM | `run_nbhmm.py` |
 | | BOCPD-residual | `run_bocpd_residual.py` |
 | | RateChange-residual | `run_ratechange_residual.py` |
 | Ensembles | OR-vote search + validation-based selection | `search_ensembles.py`, `fix_ensemble_val_selection.py` |
